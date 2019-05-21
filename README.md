@@ -15,7 +15,7 @@ Inode的结构基本给出，但是大小需要控制
 在Inode Structure部分给出
 改进的建议：
 inode_block 和 block_pointer可以用偏移地址来计算，在superblock中存放inode blocks和data blocks的起始地址（data block可以存分段地址），则Inode中的指针即相当于偏移量，这样可以减小Inode大小
-经过分析，如下inode structure，short可以用于表示偏移，则大大减小了inode的字节大小
+经过分析，如下inode structure，short可以用于表示块偏移，则大大减小了inode的字节大小
 
 
 ## Block Analysis
@@ -47,7 +47,7 @@ Super block \ inode map \ free data block map \
  inode block \ data block
  (i = sizeof(inode)) = 72
 +-------+--------+--------+-----------+------------------+
-| S:1db | is:1db | ds:2db | inode:8*i |   data blocks    |
+| S:1db | im:1db | dm:2db | inode:8*i |   data blocks    |
 +-------+--------+--------+-----------+------------------+
 Total Size: 256MB
 Manage Size: 2.3MB
@@ -58,6 +58,9 @@ Other Size: 3.7MB
 
 
 ### 实现相关
+
+super block：
+
 函数原型：int fs_statfs (const char *path, struct statvfs *stat);
 函数功能：查询文件系统整体的统计信息。
 
@@ -110,29 +113,27 @@ Struct Inode{
         double indirect pointer: 1x
     }
 }
-
-
-
-//--------- size of inode ---------
-// #1
-// pointer size = 8B
-// pointers size:  (d_ptr + id_ptr + dib_ptr)x8 
-// total size = mode + size + atime + ctime + mtime +  
-//      (links_cnt) + inode_block + blocks_cnt + blocks_pointer
-//       = char + size_t + time_t*3 + u_int*2 +  
-         (int) + inode_block + int + blocks_pointer
-         =?
-// #2
-// ptr = short
-// total size = mode_t + u_int + time_t*3 + u_short*2 + u_short*15
-// total size = 72
-
-//deleted: links_cnt可以略去？ppt中说等于1即可
-//deleted: uid=getuid(), gid=getgid()
-
-//usage in functions:
-//atime(read/readdir/mkdir) mtime(write/mkdir) ctime(write/mkdir)
-//mode(open):判断用户是否有权限读/
-
 ```
 
+```
+--------- size of inode ---------
+#1
+pointer size = 8B
+pointers size:  (d_ptr + id_ptr + dib_ptr)x8 
+total size = mode + size + atime + ctime + mtime +  
+     (links_cnt) + inode_block + blocks_cnt + blocks_pointer
+      = char + size_t + time_t*3 + u_int*2 +  
+        (int) + inode_block + int + blocks_pointer
+        =?
+#2
+ptr = short
+total size = mode_t + u_int + time_t*3 + u_short*2 + u_short*15
+total size = 72
+
+deleted: links_cnt可以略去？ppt中说等于1即可
+deleted: uid=getuid(), gid=getgid()
+
+usage in functions:
+atime(read/readdir/mkdir) mtime(write/mkdir) ctime(write/mkdir)
+mode(open):判断用户是否有权限读/
+```
