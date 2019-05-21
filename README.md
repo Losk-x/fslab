@@ -95,6 +95,9 @@ $$\frac{8MB}{4KB}=2K\ blk$$
 $$\frac{4KB}{8B}=512个$$
 则用indirect pointer来存放所有指针，至少需要4个indirect pointer
 
+block pinter用偏移地址表示：
+$$addr\ bit = \log_{2}{total\ block\ number} = log_2{64k}=16$$
+则用一个short即可表示所有block的偏移地址
 
 ### 结构设计
 假设：大部分文件都是小文件，大多为几十到几百KB，大文件为少数，故我们只用在inode设置少量indirect pointer或 double indirect pointer即可支持大文件。
@@ -105,23 +108,17 @@ $$\frac{4KB}{8B}=512个$$
 Struct Inode{
     mode (read/write/executed)
     size
-    atime\ctime\mtime               
-    links_cnt
+    atime\ctime\mtime
     inode_block
     blocks_cnt
     blocks_pointer{
-        #1
-        direct pointer: 4x
-        indirect pointer: 4x(?)
-        
-        #2
-        direct pointer: 
-
+        direct pointer: 12x
+        indirect pointer: 2x
+        double indirect pointer: 
     }
-    
 }
 
-//links_cnt可以略去？ppt中说等于1即可
+
 
 //--------- size of inode ---------
 // pointer size = 8B
@@ -133,8 +130,8 @@ Struct Inode{
 
 
 
-
-//deleted:uid=getuid(), gid=getgid()
+//deleted: links_cnt可以略去？ppt中说等于1即可
+//deleted: uid=getuid(), gid=getgid()
 
 //usage in functions:
 //atime(read/readdir/mkdir) mtime(write/mkdir) ctime(write/mkdir)
