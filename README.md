@@ -13,7 +13,6 @@ May 2019. ICS2's lab
 > 
 > ljt:好的
 
-
 ```
 #define BLOCK_SIZE 4096
 #define BLOCK_NUM 65536
