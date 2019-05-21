@@ -43,6 +43,7 @@ inode\ block = 32768 *\alpha\ B = 32*\alpha\ KB = 8*\alpha\ blk\ ,\  \alpha = 56
 manage\ blk = 56*8+1+2+1 = 452\\
 manage\ blk\ size = 452*4K = (256+196)*4K = 2M
 $$
+
 ```
 File System Map(similar to VSFS):
 Super block \ inode map \ free data block map \
