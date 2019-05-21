@@ -10,6 +10,10 @@ May 2019. ICS2's lab
 
 ## block analysis
 > 希望ljt来做可视化的说明
+> 
+> ljt:好的
+
+
 ```
 #define BLOCK_SIZE 4096
 #define BLOCK_NUM 65536
@@ -23,12 +27,12 @@ May 2019. ICS2's lab
 
 $$
 have: \\
-65536 = 64 * 1024 = 64K \\
-4096 B = 4 KB \\
-total size = 256 MB \\
+block\ id\ 65536 = 64 * 1024 = 64K\ storage\ size\\
+block\ size\ 4096 B = 4 KB\ storage\ size \\
+total\ size = 256 MB \\
 need: \\
 250M \ or \ 
-32768 * 8 \ MB = 256 \ MB \\
+32768 * 8 \ MB = 256 \ MB \ blocks\ total\ size\\
 manage\ block: 0 - 6MB \\
 manage\ block: super\ block+map\ block+inode\ block \\
 super\ block = 1\ blk \\
@@ -40,4 +44,12 @@ manage\ blk = 56*8+1+2+1 = 452\\
 manage\ blk\ size = 452*4K = (256+196)*4K = 2M
 $$
 
-
+```
+File System Map(similar to VSFS):
+Super block \ inode map \ free data block map \
+ inode block \ data block
+ (i = sizeof(inode))
++-------+--------+--------+-----------+------------------+
+| S:1db | is:1db | ds:2db | inode:8*i |   data blocks    |
++-------+--------+--------+-----------+------------------+
+```
