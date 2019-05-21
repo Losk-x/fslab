@@ -24,7 +24,6 @@ May 2019. ICS2's lab
 * 至少支持32768个文件及目录
 * 只需支持单个文件最大8MB，如果有能力可以支持更大的单文件大小（存在额外测试点）。
 * 只需支持文件名最大长度为24字符，且同一目录下不存在名称相同的文件或目录。
-
 $$
 have: \\
 block\ id\ 65536 = 64 * 1024 = 64K\ storage\ size\\
@@ -43,7 +42,6 @@ inode\ block = 32768 *\alpha\ B = 32*\alpha\ KB = 8*\alpha\ blk\ ,\  \alpha = 56
 manage\ blk = 56*8+1+2+1 = 452\\
 manage\ blk\ size = 452*4K = (256+196)*4K = 2M
 $$
-
 ```
 File System Map(similar to VSFS):
 Super block \ inode map \ free data block map \
