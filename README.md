@@ -5,7 +5,8 @@ May 2019. ICS2's lab
 最新的事项写在issues中。
 
 ## issue
-百废俱兴，先设计块的规格
+块的规格数值大致算好了
+计算中有一处失误，就是$\alpha$的值，只计算了该填的stat的属性（见ppt和根目录下的test.c），未计算inode中应有的pointer
 
 ## block analysis
 > 希望ljt来做可视化的说明
@@ -34,7 +35,7 @@ super\ block = 1\ blk \\
 free\ block= \frac{252M}{4K} = 63K \\
 free\ block\ bitmap =  \frac{63K}{8*4K} = 2\ blk\\
 inode\ bitmap = \frac{32768}{8*4K} = 1\ blk\\
-inode\ block = 32768 *\alpha\ B = 32*\alpha\ KB = 8*\alpha\ blk\ ,\  \alpha = 56 \\
+inode\ block = 32768 *\alpha\ B = 32*\alpha\ KB = 8*\alpha\ blk\ ,\  \alpha = 56 (wrong,didn't\ consider\ pointers) \\
 manage\ blk = 56*8+1+2+1 = 452\\
 manage\ blk\ size = 452*4K = (256+196)*4K = 2M
 $$
