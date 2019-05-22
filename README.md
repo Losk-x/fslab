@@ -12,13 +12,18 @@ May 2019. ICS2's lab
 如空闲块，inode块等的起始地址。根据块的偏移计算实际地址的宏函数等。
 
 1
+
 块的规格数值大致算好了
+
 计算中有一处失误，就是$\alpha$的值，只计算了该填的stat的属性（见ppt和根目录下的test.c），未计算inode中应有的pointer
 
 2
+
 Inode的结构基本给出，但是大小需要控制
 在Inode Structure部分给出
+
 改进的建议：
+
 inode_block 和 block_pointer可以用偏移地址来计算，在superblock中存放inode blocks和data blocks的起始地址（data block可以存分段地址），则Inode中的指针即相当于偏移量，这样可以减小Inode大小
 经过分析，如下inode structure，short可以用于表示块偏移，则大大减小了inode的字节大小
 
@@ -89,12 +94,14 @@ struct statvfs {
 需要支持文件最大为8MB，即为
 $$\frac{8MB}{4KB}=2K\ blk$$
 
-方案1
+方案1:
+
 如果利用8B的指针来表示data block的地址，则一个data block中能够存放的data block指针数量为
 $$\frac{4KB}{8B}=512个$$
 则用indirect pointer来存放所有指针，至少需要4个indirect pointer
 
-方案2
+方案2:
+
 如果用偏移地址表示block pinter的地址：
 $$addr\ bit = \log_{2}{total\ block\ number} = \log_2{64k}=16$$
 则用一个short即可表示所有block的偏移地址，只需要在super block中记录data block的地址即可（可以做分段以提高性能）
@@ -164,10 +171,8 @@ mode(open):判断用户是否有权限读/
 > 
 > 结论：上述inode中留下size和block_cnt
 
-<<<<<<< HEAD
 > keep a size, and we should have little bitmap to point out whether the indirect or double indirect pointers have been used. Thus, we needn't to check whether the pointers're NULL. 
 > The bitmap for the pointers is [c][bb][aaaa] : in which a means the num of direct pointers, b means the num of the indirect pointers, and c the double indirect pointers.
-=======
 
 ## 实现细节
 --- 
@@ -175,19 +180,43 @@ mode(open):判断用户是否有权限读/
 #### 函数介绍
 Description:
     初始化文件系统，写入文件系统基本信息以及根目录“/”的信息。
+
 Return:
     正常返回0，否则返回-1
 
 #### 相关：super block设计
 - super block的空间十分充裕(4KB，我们可以用它存放我们所需要的一切辅助信息
 - 文件系统的基本信息
-  - 覆盖fs_statfs函数需要得到的信息，即包含：块大小、块数量、空闲块数量、可用块数量(?)、文件节点数、空闲节点数、可用节点数、文件名长度上限
+  - 覆盖fs_statfs函数需要得到的信息，即包含：块大小、块数量、空闲块数量、可用块数量、文件节点数、空闲节点数、可用节点数、文件名长度上限
   - 包含inode map、data map、inodes blocks、data blocks的指针(disk_read和disk_write给出我们对虚拟块的读写是基于block id进行的，故这些指针其实也只是代表偏移量即可)
+  - 经过测试，statvfs结构体大小为112,其他地址均可用unsigned short存储，则super block占用空间为112+2*5=122B
 - super block结构
   ```
-  +------------------------------------------------------------------+
-  |                                                                  |
-  +------------------------------------------------------------------+
+  struct super_blk{
+      struct statvfs stat;
+      unsigned short root_i;
+      unsigned short imap_addr;
+      unsigned short inode_base_addr;
+      unsigned short dbmap_addr;
+      unsigned short db_base_addr;
+  };
   ```
-
->>>>>>> 2463ed1add7a1bc8bad36b3c76a77acde2c9a7f6
+  ```
+     struct     u_short       u_short            u_short        
+   +----=----+------------+-------------====+------------------+
+   | statvfs | root inode | inodes map addr | inodes base addr |
+   +-----=---+------------+------------====-+------------------+
+   0        112          114               116                118
+     u_short         u_short                                  
+   +-----=-------+--------------+------------------------------+
+   | db map addr | db base addr |      empty ...               |
+   +-----=-------+--------------+------------------------------+
+   118          120            122                            4k
+  ```
+  > Basic Information: 
+  > 
+  > (1)block size, (2)block count(宏定义), (3)free block count, (4)available block count(=free block count), (5)inodes count, (6)free inodes count, (7)available inodes count(=free inodes count), (8)max filename length, (9)root dir inode_n
+  > 
+  > Helper: 
+  > 
+  > inodes map addr, datablocks map addr, ... (暂时这样先)
