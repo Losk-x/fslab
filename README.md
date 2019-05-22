@@ -164,6 +164,10 @@ mode(open):判断用户是否有权限读/
 > 
 > 结论：上述inode中留下size和block_cnt
 
+<<<<<<< HEAD
+> keep a size, and we should have little bitmap to point out whether the indirect or double indirect pointers have been used. Thus, we needn't to check whether the pointers're NULL. 
+> The bitmap for the pointers is [c][bb][aaaa] : in which a means the num of direct pointers, b means the num of the indirect pointers, and c the double indirect pointers.
+=======
 
 ## 实现细节
 --- 
@@ -186,3 +190,4 @@ Return:
   +------------------------------------------------------------------+
   ```
 
+>>>>>>> 2463ed1add7a1bc8bad36b3c76a77acde2c9a7f6
