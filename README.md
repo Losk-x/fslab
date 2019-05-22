@@ -169,8 +169,6 @@ mode(open):判断用户是否有权限读/
 > 另外size的话有点疑问，应该是记录实际write了多少，而非记录用了多少块，可能需要计算，或者不计算。得权衡空间来考虑，暂时加入. \
 > 结论：上述inode中留下size和block_cnt
 
-<<<<<<< HEAD
-<<<<<<< HEAD
 > keep a size, and we should have little bitmap to point out whether the indirect or double indirect pointers have been used. Thus, we needn't to check whether the pointers're NULL. \
 > The bitmap for the pointers is [c][bb][aaaa] : in which a means the num of direct pointers, b means the num of the indirect pointers, and c the double indirect pointers. \
 > And because the align, the sizeof(inode) doesn't change. In fact, the total size of Inode is 67.
@@ -178,7 +176,7 @@ mode(open):判断用户是否有权限读/
 =======
 > keep a size, and we should have little bitmap to point out whether the indirect or double indirect pointers have been used. Thus, we needn't to check whether the pointers're NULL. 
 > The bitmap for the pointers is [c][bb][aaaa] : in which a means the num of direct pointers, b means the num of the indirect pointers, and c the double indirect pointers.
->>>>>>> 1dd4e9cbc91182f56aca95e2e0f359c91019a0d5
+
 
 ## 实现细节
 --- 
@@ -199,18 +197,18 @@ Return:
 - super block结构
   ```
   struct super_blk{
-      struct statvfs stat;
-      unsigned short root_i;
-      unsigned short imap_addr;
-      unsigned short inode_base_addr;
-      unsigned short dbmap_addr;
-      unsigned short db_base_addr;
+      struct statvfs stat; //包含文件系统统计信息结构体
+      unsigned short root_i; //根目录的inode
+      unsigned short imap_addr; //inode bitmap的基址
+      unsigned short inode_base_addr; //inodes的基址
+      unsigned short dbmap_addr; //data block bitmap的基址
+      unsigned short db_base_addr; //data blocks的基址
   };
   ```
-<<<<<<< HEAD
 
-=======
   ```
+  结构示意图：
+
      struct     u_short       u_short            u_short        
    +----=----+------------+-------------====+------------------+
    | statvfs | root inode | inodes map addr | inodes base addr |
@@ -222,6 +220,7 @@ Return:
    +-----=-------+--------------+------------------------------+
    118          120            122                            4k
   ```
+
   > Basic Information: 
   > 
   > (1)block size, (2)block count(宏定义), (3)free block count, (4)available block count(=free block count), (5)inodes count, (6)free inodes count, (7)available inodes count(=free inodes count), (8)max filename length, (9)root dir inode_n
@@ -229,4 +228,3 @@ Return:
   > Helper: 
   > 
   > inodes map addr, datablocks map addr, ... (暂时这样先)
->>>>>>> 1dd4e9cbc91182f56aca95e2e0f359c91019a0d5
