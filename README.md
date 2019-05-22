@@ -44,7 +44,7 @@ inode_block 和 block_pointer可以用偏移地址来计算，在superblock中�
 * 只需支持文件名最大长度为24字符，且同一目录下不存在名称相同的文件或目录。
 
 
-$$have: \\block\ id\ 65536 = 64 * 1024 = 64K\ storage\ size\\block\ size\ 4096 B = 4 KB\ storage\ size \\total\ size = 256 MB \\need:\\250M \ or \ 32768 * 8 \ MB = 256 \ MB \ blocks\ total\ size\\manage\ block: 0 - 6MB \\manage\ block: super\ block+map\ block+inode\ block \\super\ block = 1\ blk \\free\ block= \frac{252M}{4K} = 63K \\free\ block\ bitmap =  \frac{63K}{8*4K} = 2\ blk\\inode\ bitmap = \frac{32768}{8*4K} = 1\ blk\ inode\ block = 32768 *\alpha\ B = 32*\alpha\ KB = 8*\alpha\ blk\ ,\  \alpha = 72 (wrong,didn't\ consider\ pointers) \\manage\ blk = 72*8+1+2+1 = 580\\manage\ blk\ size = 580*4K \approx 2.3M$$
+$$have: \\block\ id\ 65536 = 64 * 1024 = 64K\ storage\ size\\block\ size\ 4096 B = 4 KB\ storage\ size \\total\ size = 256 MB \\need:\\250M \ or \ 32768 * 8 \ MB = 256 \ MB \ blocks\ total\ size\\manage\ block: 0 - 6MB \\manage\ block: super\ block+map\ block+inode\ block \\super\ block = 1\ blk \\free\ block= \frac{252M}{4K} = 63K \\free\ block\ bitmap =  \frac{63K}{8*4K} = 2\ blk\\inode\ bitmap = \frac{32768}{8*4K} = 1\ blk\ (wrong\ calc)\\\ inode\ block = 32768 *\alpha\ B = 32*\alpha\ KB = 8*\alpha\ blk\ ,\  \alpha = 72 \ (wrong\ calc)\\ inode\ per\ block = \frac{4096}{72} \approx 56 \\ inode\ block = \frac{32768}{56} \approx 586\\ manage\ blk = 586+1+2+1 = 580\\manage\ blk\ size = 580*4K \approx 2.3M$$
 
 ```
 File System Map(similar to VSFS):
@@ -130,8 +130,7 @@ Struct Inode{
     mode (read/write/executed)
     size ?
     atime,ctime,mtime
-    inode_block ?
-    blocks_cnt ?
+    bitmap_for_pointer
     blocks_pointer{
         direct pointer: 12x
         indirect pointer: 2x
@@ -159,14 +158,14 @@ usage in functions:
 atime(read/readdir/mkdir) mtime(write/mkdir) ctime(write/mkdir)
 mode(open):判断用户是否有权限读/
 ```
-> 采纳方案二，其中inode_block, blocks_cnt不太清楚为什么要记。
-> 另外size的话有点疑问，应该是记录实际write了多少，而非记录用了多少块，可能需要计算，或者不计算。得权衡空间来考虑，暂时加入。
-> 
+> 采纳方案二，其中inode_block, blocks_cnt不太清楚为什么要记。\
+> 另外size的话有点疑问，应该是记录实际write了多少，而非记录用了多少块，可能需要计算，或者不计算。得权衡空间来考虑，暂时加入. \
 > 结论：上述inode中留下size和block_cnt
 
 <<<<<<< HEAD
-> keep a size, and we should have little bitmap to point out whether the indirect or double indirect pointers have been used. Thus, we needn't to check whether the pointers're NULL. 
-> The bitmap for the pointers is [c][bb][aaaa] : in which a means the num of direct pointers, b means the num of the indirect pointers, and c the double indirect pointers.
+> keep a size, and we should have little bitmap to point out whether the indirect or double indirect pointers have been used. Thus, we needn't to check whether the pointers're NULL. \
+> The bitmap for the pointers is [c][bb][aaaa] : in which a means the num of direct pointers, b means the num of the indirect pointers, and c the double indirect pointers. \
+> And because the align, the sizeof(inode) doesn't change. In fact, the total size of Inode is 67.
 =======
 
 ## 实现细节
@@ -190,4 +189,3 @@ Return:
   +------------------------------------------------------------------+
   ```
 
->>>>>>> 2463ed1add7a1bc8bad36b3c76a77acde2c9a7f6

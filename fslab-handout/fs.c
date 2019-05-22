@@ -32,12 +32,31 @@ struct Inode {
 //Format the virtual block device in the following function
 int mkfs()
 {
+
 	return 0;
+}
+
+int get_inode(const char* path,struct Inode *target) {
+    
 }
 
 //Filesystem operations that you need to implement
 int fs_getattr (const char *path, struct stat *attr)
 {
+    if(NULL == path) {
+        printf("path is NULL\n");
+        return -ENOENT;
+    }
+
+    size_t path_len = strlen(path);
+
+    if(path[path_len-1] == '/') {
+        attr.st_mode = 
+    }
+    else {
+
+    }
+
 	printf("Getattr is called:%s\n",path);
 	return 0;
 }
