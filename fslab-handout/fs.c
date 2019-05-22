@@ -23,6 +23,7 @@ struct inode {
     __time_t atime;
     __time_t mtime;
     __time_t ctime;
+    unsigned char pointer_bmap;
     unsigned short dir_pointer[12];
     unsigned short ind_pointer[2];
     unsigned short doub_ind_pointer;    
