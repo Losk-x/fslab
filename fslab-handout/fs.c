@@ -17,12 +17,13 @@ Filesystem Lab disigned and implemented by Liang Junkai,RUC
 #define DIRMODE S_IFDIR|0755
 #define REGMODE S_IFREG|0644
 
-struct inode {
+struct Inode {
 	mode_t mode;
     off_t size;
     __time_t atime;
     __time_t mtime;
     __time_t ctime;
+    unsigned char pointer_bmap;
     unsigned short dir_pointer[12];
     unsigned short ind_pointer[2];
     unsigned short doub_ind_pointer;    
