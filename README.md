@@ -163,3 +163,6 @@ mode(open):判断用户是否有权限读/
 > 另外size的话有点疑问，应该是记录实际write了多少，而非记录用了多少块，可能需要计算，或者不计算。得权衡空间来考虑，暂时加入。
 > 
 > 结论：上述inode中留下size和block_cnt
+
+> keep a size, and we should have little bitmap to point out whether the indirect or double indirect pointers have been used. Thus, we needn't to check whether the pointers're NULL. 
+> The bitmap for the pointers is [c][bb][aaaa] : in which a means the num of direct pointers, b means the num of the indirect pointers, and c the double indirect pointers.

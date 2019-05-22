@@ -13,7 +13,18 @@ struct s {
     __u_short k[15];
 }aaa;
 
+struct inode {
+	mode_t mode;
+    off_t size;
+    __time_t atime;
+    __time_t mtime;
+    __time_t ctime;
+    unsigned short dir_pointer[12];
+    unsigned short ind_pointer[2];
+    unsigned short doub_ind_pointer;    
+}bbb;
+
 int main() {
-    printf("%ld\n",sizeof(aaa));
+    printf("%ld\n",sizeof(bbb));
     return 0;
 }
