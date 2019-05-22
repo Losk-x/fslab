@@ -6,6 +6,11 @@ May 2019. ICS2's lab
 
 ## Issues
 ---
+> 讨论需知，评论的话用尖括号起头的引用块。
+
+正在进行中，确定起始管理块的大小和位置。然后根据此定义一些宏来帮助编程。
+如空闲块，inode块等的起始地址。根据块的偏移计算实际地址的宏函数等。
+
 1
 块的规格数值大致算好了
 计算中有一处失误，就是$\alpha$的值，只计算了该填的stat的属性（见ppt和根目录下的test.c），未计算inode中应有的pointer
@@ -101,17 +106,37 @@ $$addr\ bit = \log_{2}{total\ block\ number} = log_2{64k}=16$$
 不妨暂定为:
 (基于实现的具体功能来设计)
 ```
+struct stat {
+	mode_t  st_mode; //文件对应的模式
+	nlink_t st_nlink = 1;//文件的链接数
+	uid_t   st_uid = getuid();  //文件所有者
+	gid_t   st_gid = getgid();  //文件所有者的组
+	off_t   st_size; //文件字节数
+	time_t  st_atime;//被访问的时间
+	time_t  st_mtime;//被修改的时间
+	time_t  st_ctime;//状态改变时间
+};
+```
+在inode中
+~~`st_nlink,st_uid,st_gid`~~
+
+原因：
+只需支持单用户单线程访问，不必考虑权限问题；
+并且没有`link()`
+
+
+```
 Struct Inode{
     mode (read/write/executed)
-    size
+    size ?
     atime,ctime,mtime
-    inode_block
-    blocks_cnt
+    inode_block ?
+    blocks_cnt ?
     blocks_pointer{
         direct pointer: 12x
         indirect pointer: 2x
         double indirect pointer: 1x
-    }
+    } //我不喜欢套中套，代码写起来不方便。直接放外面就好
 }
 ```
 
@@ -126,14 +151,15 @@ total size = mode + size + atime + ctime + mtime +
         (int) + inode_block + int + blocks_pointer
         =?
 #2
-ptr = short
+ptr = short //用unsigned short，记录块偏移即可，实际使用是注意隐式类型转换
 total size = mode_t + u_int + time_t*3 + u_short*2 + u_short*15
 total size = 72
-
-deleted: links_cnt可以略去？ppt中说等于1即可
-deleted: uid=getuid(), gid=getgid()
 
 usage in functions:
 atime(read/readdir/mkdir) mtime(write/mkdir) ctime(write/mkdir)
 mode(open):判断用户是否有权限读/
 ```
+> 采纳方案二，其中inode_block, blocks_cnt不太清楚为什么要记。
+> 另外size的话有点疑问，应该是记录实际write了多少，而非记录用了多少块，可能需要计算，或者不计算。得权衡空间来考虑，暂时加入。
+> 
+> 结论：上述inode中留下size和block_cnt
