@@ -17,7 +17,7 @@ Filesystem Lab disigned and implemented by Liang Junkai,RUC
 #define DIRMODE S_IFDIR|0755
 #define REGMODE S_IFREG|0644
 
-struct inode {
+struct Inode {
 	mode_t mode;
     off_t size;
     __time_t atime;
