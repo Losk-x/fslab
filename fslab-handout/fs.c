@@ -279,8 +279,8 @@ int get_inode_idir(const char* filename, int dir_offset){
             i--;
             continue;
         }
-
-        disk_read((unsigned short)FBLK_BASE + dir_inode.dir_pointer[i], buf); //////////warning: 没有检测回来的值是否是0/1
+		if (disk_read((unsigned short)FBLK_BASE + dir_inode.dir_pointer[i], buf)) //////////warning: 没有检测回来的值是否是0/1
+			return -1;
         dir_pair = (struct DirPair *)buf;
         for (j = 0; j < DIR_PAIR_PBLK; j++, dir_pair++){
             // dir inode num initialize to -1
@@ -300,16 +300,18 @@ int get_inode_idir(const char* filename, int dir_offset){
             continue;
         }
         char ptr_buf[BLOCK_SIZE];
-        disk_read((unsigned short)FBLK_BASE + dir_inode.ind_pointer[i], ptr_buf); //////////warning: 没有检测回来的值是否是0/1
-        // pointer number in the indirect pointer block
+        if (disk_read((unsigned short)FBLK_BASE + dir_inode.ind_pointer[i], ptr_buf)) //////////warning: 没有检测回来的值是否是0/1
+			return -1;
+		// pointer number in the indirect pointer block
         // unsigned int ptr_num = (unsigned int)((short)ptr_buf);
-        for (k = 0; k < DIR_PAIR_PBLK; k++){ /////////////////wrong, DIR_PAIR_PBLK should be PTR_MAX_PBLK
+        for (k = 0; k < PTR_MAX_PBLK; k++){ /////////////////wrong, DIR_PAIR_PBLK should be PTR_MAX_PBLK
 			unsigned short *short_ptr = (unsigned short *)ptr_buf;
             if (*(ptr_buf + k) == (unsigned short)(-1)){ //////////////wrong, should be *(short_ptr+k)
                 continue;
             }
-            disk_read((unsigned short)FBLK_BASE + *(short_ptr + k), buf); //////////warning: 没有检测回来的值是否是0/1
-            dir_pair = (struct DirPair *)buf;
+            if (disk_read((unsigned short)FBLK_BASE + *(short_ptr + k), buf)) //////////warning: 没有检测回来的值是否是0/1
+				return -1;
+			dir_pair = (struct DirPair *)buf;
             for (j = 0; j < DIR_PAIR_PBLK; j++, dir_pair++){
                 // if names match, return inode num
                 if (dir_pair->inode_num == -1)
@@ -321,34 +323,37 @@ int get_inode_idir(const char* filename, int dir_offset){
         }
     }
     // read double indirect data blocks and compare
-    for (i = 0; i < dual_ptr_num; i++){ /////////////wrong dual_ptr_num should be dual_ind_ptr_num 而且这只有0/1没必要
+    if(dual_ind_ptr_num == 1){ /////////////wrong dual_ptr_num should be dual_ind_ptr_num 而且这只有0/1没必要
         char dptr_buf[BLOCK_SIZE + 1];
-        if (dir_inode.doub_pointer[i] == (unsigned short)(-1)){ ////////////wrong,double indirect ptr就只有一个，这个不是数组，错了
-            i--;
+        if (dir_inode.doub_pointer == (unsigned short)(-1)){ ////////////wrong,double indirect ptr就只有一个，这个不是数组，错了
             continue;
         }
-        disk_read((unsigned short)FBLK_BASE + dir_inode.doub_pointer[i], dptr_buf); ////////// wrong,doub_pointer should be doub_ind_pointer
-        ////////////////////////////////////////////////////////////////////////////////////// warning: 没有检测回来的值是否是0/1
+        if (disk_read((unsigned short)FBLK_BASE + dir_inode.doub_ind_pointer , dptr_buf) )////////// wrong,doub_pointer should be doub_ind_pointer
+			return -1;
+		////////////////////////////////////////////////////////////////////////////////////// warning: 没有检测回来的值是否是0/1
+
 		// pointer number in the double indirect pointer block
         // unsigned int dptr_num = (unsigned int)((short)dptr_buf);
         
-        for (k = 0; k < DIR_PAIR_PBLK; k++){ //////////wrong, DIR_PAIR_PBLK should be PTR_MAX_PBLK
+        for (i = 0; i < PTR_MAX_PBLK; i++){ //////////wrong, DIR_PAIR_PBLK should be PTR_MAX_PBLK
 			unsigned short *dshort_ptr = (unsigned short *)dptr_buf; 
-            if (*(dshort_ptr + k) == (unsigned short)(-1)){
+            if (*(dshort_ptr + i) == (unsigned short)(-1)){
                 continue;
             }
             char ptr_buf[BLOCK_SIZE + 1];
-            disk_read(((unsigned short)FBLK_BASE + *(dshort_ptr + k)), ptr_buf); //////////warning: 没有检测回来的值是否是0/1
-            // unsigned int ptr_num = (unsigned int)((short)ptr_buf);
-            int l; //吐槽一句，j都没用就用k，就用l。顺序有点问题
-            for (l = 0; l < ptr_num; l++){ /////////wrong ptr_num不存在，应该是PTR_MAX_PBLK
+            if (disk_read(((unsigned short)FBLK_BASE + *(dshort_ptr + i)), ptr_buf)) //////////warning: 没有检测回来的值是否是0/1
+				return -1;
+			// unsigned int ptr_num = (unsigned int)((short)ptr_buf);
+            // int l; //吐槽一句，j都没用就用k，就用l。顺序有点问题
+            for (j = 0; j < PTR_MAX_PBLK; j++){ /////////wrong ptr_num不存在，应该是PTR_MAX_PBLK
 				unsigned short *short_ptr = (unsigned short *)ptr_buf;
-                if (*(short_ptr + k) == (unsigned short)(-1)){
+                if (*(short_ptr + j) == (unsigned short)(-1)){
                     continue;
                 }
-                disk_read((unsigned short)FBLK_BASE + *(short_ptr + k), buf); /////////warning: 没有检测回来的值是否是0/1
-                dir_pair = (struct DirPair *)buf;
-                for (j = 0; j < DIR_PAIR_PBLK; j++, dir_pair++){ 
+                if (disk_read((unsigned short)FBLK_BASE + *(short_ptr + j), buf)) /////////warning: 没有检测回来的值是否是0/1
+					return -1;
+				dir_pair = (struct DirPair *)buf;
+                for (k = 0; k < DIR_PAIR_PBLK; k++, dir_pair++){ 
                     // if names match, return inode num
                     if (dir_pair->inode_num == -1)
                         continue;
