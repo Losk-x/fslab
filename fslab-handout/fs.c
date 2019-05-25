@@ -75,14 +75,9 @@ typedef struct {
 	char name[NAME_MAX_LEN+1];
 }DirPair;
 
-//Format the virtual block device in the following function
-int mkfs()
-{
-
-	return 0;
-}
 
 
+/******* helper function begin *******/
 
 
 // get inode num from path
@@ -90,7 +85,7 @@ int mkfs()
 // (-1) - disk read error
 // (-2) - filename or path not exist
 // (-3) - root dir not included
-// else return num ///////////////////////////的确改成这个会更好
+// else return num
 int get_inode(const char* path,struct Inode *target) {
 	
 	// 不包含根目录，返回-3
@@ -277,10 +272,17 @@ int get_inode_iblk(int inode_num, struct Inode* inode ){
         return -1;
 }
 
+/******* helper function end *******/
 
 
 
 
+//Format the virtual block device in the following function
+int mkfs()
+{
+
+	return 0;
+}
 
 //Filesystem operations that you need to implement
 int fs_getattr (const char *path, struct stat *attr)
