@@ -17,6 +17,24 @@ Filesystem Lab disigned and implemented by Liang Junkai,RUC
 #define DIRMODE S_IFDIR|0755
 #define REGMODE S_IFREG|0644
 
+//support function and macro
+
+//bases of bitmaps,inode,free block (block offset)
+//inode bitmap base 
+#define INODE_BMAP_BASE 
+//inode base 
+#define INODE_BASE 
+//free block bitmap base
+#define FBLK_BMAP_BASE
+//free block base
+#define FBLK_BASE
+
+//num of inode per block
+#define INODE_NUM_PBLK
+//inode size
+#define INODE_SIZE
+
+
 struct Inode {
 	mode_t mode;
     off_t size;
@@ -37,7 +55,7 @@ int mkfs()
 }
 
 int get_inode(const char* path,struct Inode *target) {
-    
+
 }
 
 //Filesystem operations that you need to implement
