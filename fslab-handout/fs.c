@@ -19,22 +19,30 @@ Filesystem Lab disigned and implemented by Liang Junkai,RUC
 
 //support function and macro
 
+//macro constant 
+
 //bases of bitmaps,inode,free block (block offset)
 //inode bitmap base 
-#define INODE_BMAP_BASE 
+#define INODE_BMAP_BASE 1
 //inode base 
-#define INODE_BASE 
+#define INODE_BASE  4
 //free block bitmap base
-#define FBLK_BMAP_BASE
+#define FBLK_BMAP_BASE  2
 //free block base
-#define FBLK_BASE
+#define FBLK_BASE   590
 
 //num of inode per block
-#define INODE_NUM_PBLK
+#define INODE_NUM_PBLK 
 //inode size
 #define INODE_SIZE
+//root directory's inode offset, \
+In most U NIX file systems, the root inode number is 2.
+#define ROOT_I  2
 
+//macro function
+#define get_inode_blk(_inodex) ()
 
+//support struct
 struct Inode {
 	mode_t mode;
     off_t size;

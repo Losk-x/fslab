@@ -51,6 +51,8 @@ inode_block 和 block_pointer可以用偏移地址来计算，在superblock中�
 
 $$have: \\block\ id\ 65536 = 64 * 1024 = 64K\ storage\ size\\block\ size\ 4096 B = 4 KB\ storage\ size \\total\ size = 256 MB \\need:\\250M \ or \ 32768 * 8 \ MB = 256 \ MB \ blocks\ total\ size\\manage\ block: 0 - 6MB \\manage\ block: super\ block+map\ block+inode\ block \\super\ block = 1\ blk \\free\ block= \frac{252M}{4K} = 63K \\free\ block\ bitmap =  \frac{63K}{8*4K} = 2\ blk\\inode\ bitmap = \frac{32768}{8*4K} = 1\ blk\ (wrong\ calc)\\\ inode\ block = 32768 *\alpha\ B = 32*\alpha\ KB = 8*\alpha\ blk\ ,\  \alpha = 72 \ (wrong\ calc)\\ inode\ per\ block = \frac{4096}{72} \approx 56 \\ inode\ block = \frac{32768}{56} \approx 586\\ manage\ blk = 586+1+2+1 = 590 \\manage\ blk\ size = 590*4K \approx 2.3M$$
 
+$$free\ block\ bitmap=\frac{65536-590}{8*4K}\approx2blk$$
+
 ```
 File System Map(similar to VSFS):
 Super block \ inode map \ free data block map \
