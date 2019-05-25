@@ -172,12 +172,11 @@ mode(open):判断用户是否有权限读/
 > 结论：上述inode中留下size和block_cnt
 
 > keep a size, and we should have little bitmap to point out whether the indirect or double indirect pointers have been used. Thus, we needn't to check whether the pointers're NULL. \
+> 
 > The bitmap for the pointers is [c][bb][aaaa] : in which a means the num of direct pointers, b means the num of the indirect pointers, and c the double indirect pointers. \
+> 
 > And because the align, the sizeof(inode) doesn't change. In fact, the total size of Inode is 67.
-=======
-=======
-> keep a size, and we should have little bitmap to point out whether the indirect or double indirect pointers have been used. Thus, we needn't to check whether the pointers're NULL. 
-> The bitmap for the pointers is [c][bb][aaaa] : in which a means the num of direct pointers, b means the num of the indirect pointers, and c the double indirect pointers.
+
 
 
 ## 实现细节

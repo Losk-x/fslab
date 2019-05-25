@@ -21,9 +21,9 @@ Filesystem Lab disigned and implemented by Liang Junkai,RUC
 
 //macro constant 
 
-//bases of bitmaps,inode,free block (block offset)
+//bases of bitmaps,inode,free block (block offset):
 //inode bitmap base 
-#define INODE_BMAP_BASE 1
+#define INODE_BMAP_BASE	1
 //inode base 
 #define INODE_BASE  4
 //free block bitmap base
@@ -31,19 +31,34 @@ Filesystem Lab disigned and implemented by Liang Junkai,RUC
 //free block base
 #define FBLK_BASE   590
 
+//inode blks related:
 //num of inode per block
-#define INODE_NUM_PBLK 
+#define INODE_NUM_PBLK 56 ///////////////////////////////
 //inode size
-#define INODE_SIZE
+#define INODE_SIZE 72///////////////////////////
 //root directory's inode offset, \
 In most U NIX file systems, the root inode number is 2.
 #define ROOT_I  2
 
+//support struct related:
+//max_len of the file/directory's name 
+#define NAME_MAX_LEN	24
+//num of direct, indirect, double indirect pointer
+#define DIR_P_NUM	12
+#define IND_P_NUM	2
+#define	DIND_P_NUM	1
+//In directory block,
+//name:inode pair per blk
+#define DIR_PAIR_PBLK	128
+
+//In pointer block,
+//"pointer" per blk, 初始化全是-1（即无内容 65536），pointer基于FBLK_BASE，所以不会有65536个
+#define PTR_MAX_PBLK	2048
+
 //macro function
-#define get_inode_blk(_inodex) ()
 
 //support struct
-struct Inode {
+typedef struct {
 	mode_t mode;
     off_t size;
     __time_t atime;
@@ -53,7 +68,12 @@ struct Inode {
     unsigned short dir_pointer[12];
     unsigned short ind_pointer[2];
     unsigned short doub_ind_pointer;    
-};
+}Inode;
+//
+typedef struct {
+	int inode_num; // == -1 by default (if not a name)
+	char name[NAME_MAX_LEN+1];
+}DirPair;
 
 //Format the virtual block device in the following function
 int mkfs()
@@ -63,8 +83,311 @@ int mkfs()
 }
 
 int get_inode(const char* path,struct Inode *target) {
+	size_t path_len = strlen(path);
+	int dir_flag = (path[path_len-1] == '/'); //linux's '/' ; windows' '\\'
+	const char *cur = strchr(path,'/');
+	const char *prev = path;
 
+	if (!cur) {
+		return -1; //根目录都没有直接返回
+	}
+	void* buffer;
+	if (disk_read(INODE_BASE,buffer)) {
+		return -1; //读取异常 disk_read返回1
+	}
+	struct Inode* prevDir; // 注意此处用的是指针
+	prevDir = ((struc Inode*)buffer+ROOT_I);
+	//上述后续可以用get_inode_iblk
+	prev = cur; //虽然没用 但统一
+	cur = strchr(cur,'/');
+
+	while(cur) { // cur = NULL then break (if not found '/')
+		//先解析当前文件夹的名字
+		//prev是上一个'/'，cur是这一个'/'，eg: '/usr/bin/‘ cur-prev = 4
+		char cur_name[NAME_MAX_LEN];
+		strncpy(cur_name,prev+1,cur-prev-1);
+
+		//再到上一层的文件夹中去寻找
+
+		//在上一层的inode
+	}
+	if(!dir_flag) { // not a dir, thus need to get the file' inode
+
+	}
 }
+
+//find inode by name in the dir_blk
+//name should be shorter than 24 bytes, dir_inode is the inode of the dir
+//return -1 if wrong, return -2 if not found, else the inode_num of the name (>=0)
+int find_inode_inDir(const char* name,struct Inode* dir_inode) {
+	if(dir_inode->mode != DIRMODE) { //not a dir
+		return -1;
+	}
+	int PBmap = dir_inode->pointer_bmap;
+	int dirPCnt = PBmap & 0xf;
+	int indPCnt = (PBmap >> 4) & 0x3;
+	int dIndPCnt = PBmap >> 6;
+
+	void *buf;
+	//direct pointers
+	for(int i = 0;i < dirPCnt;i++) {
+		if (dir_inode->dir_pointer[i] == (unsigned short)(-1)){
+            i--;
+            continue;
+        }
+		if( disk_read(((unsigned short)FBLK_BASE) + dir_inode->dir_pointer[i], buf) ) { // == 1, wrong
+			return -1;
+		} 
+		else { //== 0, right
+			struct DirPair* dp = (struct DirPair*) buf;	
+			for(int j = 0;j < DIR_PAIR_PBLK;j++) {
+				if(dp->inode_num != -1) {
+					if(strcmp(name,dp->name) == 0) {
+						return dp->inode_num;
+					} 
+				}
+				dp++;
+			}
+		}
+	}
+	//indirect pointers
+	for(int i = 0;i < indPCnt;i++) {
+		if (dir_inode->ind_pointer[i] == (unsigned short)(-1)){
+            i--;
+            continue;
+        }
+		if( disk_read(((unsigned short)FBLK_BASE) + dir_inode->ind_pointer[i],buf) ) { // == 1 wrong
+			return -1;
+		}
+		else { //== 0, right
+			unsigned short* short_ptr = (unsigned short*) buf;
+			for(int j = 0;j < PTR_MAX_PBLK;j++) {
+				void *tbuf;
+				if( *short_ptr == ((unsigned short)-1) ) {
+					continue;
+				}
+				if ( disk_read(((unsigned short)FBLK_BASE) + *short_ptr,tbuf) ) {
+					return -1;
+				}
+				else {
+					struct DirPair* dp = (struct DirPair*) tbuf;	
+					for(int k = 0;k < DIR_PAIR_PBLK;k++) {
+						if(dp->inode_num != -1) {
+							if(strcmp(name,dp->name) == 0) {
+								return dp->inode_num;
+							} 
+						}
+						dp++;
+					}					
+				}
+				short_ptr++;
+			}
+		}
+	}
+	//double indirect 
+	if (dIndPCnt == 1) {
+		if ( disk_read(((unsigned short)FBLK_BASE) + dir_inode->doub_ind_pointer,buf) ) {
+			return -1;
+		}
+		unsigned short* short_ptr1 = (unsigned short*) buf;
+		for(int i = 0;i < PTR_MAX_PBLK;i++) {
+			void *tbuf1;
+			if( *short_ptr1 == ((unsigned short)-1) ) {
+				continue;
+			}
+			if ( disk_read(((unsigned short)FBLK_BASE) + *short_ptr1,tbuf1) ) {
+				return -1;
+			}
+			else {
+				unsigned short* short_ptr2 = (unsigned short*) tbuf1;
+				for(int j = 0;j < PTR_MAX_PBLK;j++) {
+					void *tbuf2;
+					if( *short_ptr2 == ((unsigned short)-1) ) {
+						continue;
+					}
+					if( disk_read(((unsigned short)FBLK_BASE) + *short_ptr2,tbuf2)) {
+						return -1;
+					}
+					else {
+						struct DirPair* dp = (struct DirPair*) tbuf2;	
+						for(int k = 0;k < DIR_PAIR_PBLK;k++) {
+							if(dp->inode_num != -1) {
+								if(strcmp(name,dp->name) == 0) {
+									return dp->inode_num;
+								} 
+							}
+							dp++;
+						}								
+					}
+					short_ptr2++;
+				}
+			}
+			short_ptr1++;
+		}
+	}
+	return -2;
+}
+
+
+// get inode offset from path
+int get_inode(const char* path,struct Inode *target) {
+	size_t path_len = strlen(path);
+    int i, j;
+	// start point, end point
+    int start_ptr=0, end_ptr=0;
+    char file_name[NAME_MAX_LEN + 2] = "";
+    // '/'s divide path
+    int dir_offset = ROOT_I;
+    for (i = 0; i < path_len; i++){
+        if (path[i] == '/'){
+            // get file name between two '/'
+            if (i != start_ptr){
+                end_ptr = i;
+                // get file name in dir
+                strncpy(file_name, path + start_ptr + 1, end_ptr - start_ptr - 1);
+                dir_offset = get_inode_idir(file_name, dir_offset);
+                start_ptr = i;
+            }
+        }
+    }
+	strncpy(file_name, path + start_ptr + 1, path_len - start_ptr);
+	int file_offset = get_inode_idir(file_name, dir_offset);
+    return file_offset;
+}
+
+// get file inode in a dir by filename and dir offset
+// return -1 if something is wrong, return -2 if not found , else file inode offset，
+int get_inode_idir(const char* filename, int dir_offset){
+    struct Inode dir_inode;
+    // get dir inode (struct)
+    int flag = get_inode_iblk(dir_offset, &dir_inode);
+    if (flag == -1)
+        return -1;
+
+    // get dir inode pointer number
+    int dir_ptr_num = (dir_inode.pointer_bmap & 0xf);
+    int ind_ptr_num = (dir_inode.pointer_bmap & 0x30) >> 4;
+    int dual_ind_ptr_num = (dir_inode.pointer_bmap & 0x40) >> 6;
+
+    int i, j, k;
+    char buf[BLOCK_SIZE + 1];
+    struct DirPair* dir_pair;
+    // read dir and compare file name to each dir_pair
+    for (i = 0; i < dir_ptr_num; i++){
+        // ptr used or not, if not, continue
+        if (dir_inode.dir_pointer[i] == (unsigned short)(-1)){
+            i--;
+            continue;
+        }
+
+        disk_read((unsigned short)FBLK_BASE + dir_inode.dir_pointer[i], buf); //////////warning: 没有检测回来的值是否是0/1
+        dir_pair = (struct DirPair *)buf;
+        for (j = 0; j < DIR_PAIR_PBLK; j++, dir_pair++){
+            // dir inode num initialize to -1
+            // indicates the end of dir
+            if (dir_pair->inode_num == -1)
+                continue;
+            // if names match, return inode num
+            if (strcmp(dir_pair->name, filename) == 0){
+                return dir_pair->inode_num;
+            }
+        }
+    }
+    // read indirect data blocks and compare
+    for (i = 0; i < ind_ptr_num; i++){
+        if (dir_inode.ind_pointer[i] == (unsigned short)(-1)){
+            i--;
+            continue;
+        }
+        char ptr_buf[BLOCK_SIZE];
+        disk_read((unsigned short)FBLK_BASE + dir_inode.ind_pointer[i], ptr_buf); //////////warning: 没有检测回来的值是否是0/1
+        // pointer number in the indirect pointer block
+        // unsigned int ptr_num = (unsigned int)((short)ptr_buf);
+        for (k = 0; k < DIR_PAIR_PBLK; k++){ /////////////////wrong, DIR_PAIR_PBLK should be PTR_MAX_PBLK
+			unsigned short *short_ptr = (unsigned short *)ptr_buf;
+            if (*(ptr_buf + k) == (unsigned short)(-1)){ //////////////wrong, should be *(short_ptr+k)
+                continue;
+            }
+            disk_read((unsigned short)FBLK_BASE + *(short_ptr + k), buf); //////////warning: 没有检测回来的值是否是0/1
+            dir_pair = (struct DirPair *)buf;
+            for (j = 0; j < DIR_PAIR_PBLK; j++, dir_pair++){
+                // if names match, return inode num
+                if (dir_pair->inode_num == -1)
+                    continue;
+                if (strcmp(dir_pair->name, filename) == 0){
+                    return dir_pair->inode_num;
+                }
+            }
+        }
+    }
+    // read double indirect data blocks and compare
+    for (i = 0; i < dual_ptr_num; i++){ /////////////wrong dual_ptr_num should be dual_ind_ptr_num 而且这只有0/1没必要
+        char dptr_buf[BLOCK_SIZE + 1];
+        if (dir_inode.doub_pointer[i] == (unsigned short)(-1)){ ////////////wrong,double indirect ptr就只有一个，这个不是数组，错了
+            i--;
+            continue;
+        }
+        disk_read((unsigned short)FBLK_BASE + dir_inode.doub_pointer[i], dptr_buf); ////////// wrong,doub_pointer should be doub_ind_pointer
+        ////////////////////////////////////////////////////////////////////////////////////// warning: 没有检测回来的值是否是0/1
+		// pointer number in the double indirect pointer block
+        // unsigned int dptr_num = (unsigned int)((short)dptr_buf);
+        
+        for (k = 0; k < DIR_PAIR_PBLK; k++){ //////////wrong, DIR_PAIR_PBLK should be PTR_MAX_PBLK
+			unsigned short *dshort_ptr = (unsigned short *)dptr_buf; 
+            if (*(dshort_ptr + k) == (unsigned short)(-1)){
+                continue;
+            }
+            char ptr_buf[BLOCK_SIZE + 1];
+            disk_read(((unsigned short)FBLK_BASE + *(dshort_ptr + k)), ptr_buf); //////////warning: 没有检测回来的值是否是0/1
+            // unsigned int ptr_num = (unsigned int)((short)ptr_buf);
+            int l; //吐槽一句，j都没用就用k，就用l。顺序有点问题
+            for (l = 0; l < ptr_num; l++){ /////////wrong ptr_num不存在，应该是PTR_MAX_PBLK
+				unsigned short *short_ptr = (unsigned short *)ptr_buf;
+                if (*(short_ptr + k) == (unsigned short)(-1)){
+                    continue;
+                }
+                disk_read((unsigned short)FBLK_BASE + *(short_ptr + k), buf); /////////warning: 没有检测回来的值是否是0/1
+                dir_pair = (struct DirPair *)buf;
+                for (j = 0; j < DIR_PAIR_PBLK; j++, dir_pair++){ 
+                    // if names match, return inode num
+                    if (dir_pair->inode_num == -1)
+                        continue;
+                    if (strcmp(dir_pair->name, filename) == 0){
+                        return dir_pair->inode_num;
+                    }
+                }
+            }
+        }
+    }
+
+    return -2;    
+}
+
+
+
+// get inode(struct) by inode number (in bitmap)
+// return -1 if something is wrong, else 0
+int get_inode_iblk(int inode_num, struct Inode* inode ){
+    // calculate block id and offset within a block where inode locates
+    int blk_id = INODE_BASE + inode_num/INODE_NUM_PBLK;
+    int blk_offset = INODE_SIZE * (inode_num % INODE_NUM_PBLK);
+
+    char buf[BLOCK_SIZE+1];
+    // get block by id and offset, write to buf
+    int flag = disk_read(blk_id, buf);
+    if (flag != 1){ //这里也有问题，他是正常返回0，错误返回1
+		// $$
+        inode = (struct Inode*)(buf + blk_offset);
+        return 0;
+    }
+    else
+        return -1;
+}
+
+
+
+
+
 
 //Filesystem operations that you need to implement
 int fs_getattr (const char *path, struct stat *attr)
