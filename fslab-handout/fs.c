@@ -60,15 +60,15 @@ Filesystem Lab disigned and implemented by Liang Junkai,RUC
 
 //support struct
 struct Inode {
-	mode_t mode;
-    off_t size;
+	__mode_t mode;
+    __off_t size;
     __time_t atime;
     __time_t mtime;
     __time_t ctime;
     unsigned char pointer_bmap;
     unsigned short dir_pointer[12];
     unsigned short ind_pointer[2];
-    unsigned short doub_ind_pointer;    
+    unsigned short doub_ind_pointer;
 };
 //
 struct DirPair{
@@ -88,14 +88,16 @@ struct DirPair{
  * (-3) - root dir not included
  * else return num
  */
-int get_inode(const char* path,struct Inode *target) {
+int get_inode(const char* path,struct Inode **target) {
 	// 不包含根目录，返回-3
 	if (strchr(path, '/') == NULL) //////////////////开局就错= =， strchr找不到返回的是NULL，应该是 == NULL才return
 		return -3;
 	// 只含根目录
+	struct Inode* inode_buf;
 	if ((*path == '/') && (strlen(path) == 1)){
-		if (get_inode_iblk(ROOT_I, target) == -1)
+		if (get_inode_iblk(ROOT_I, &inode_buf) == -1)
 			return -1;
+		*target = inode_buf;
 		return ROOT_I;
 	}
 
@@ -135,8 +137,9 @@ int get_inode(const char* path,struct Inode *target) {
 	int file_num = get_inode_idir(file_name, dir_num); ////////////////////wrong,如果是文件夹，那么file_name="",是这里直接返回的file_offset就是负数了，应该在此处判断区分
 	////////////////////////////////////////////////////////////////////////////否则，target无法得到正确值。这几句对文件夹的处理都有点问题，应该直接判断最后一个字符是不是'/'
 	//这一部分修改了，如果是"/xxx/xxx/"的形式，则只看"/xxx/xxx"
-    if (get_inode_iblk(file_num, target) == -1)
+    if (get_inode_iblk(file_num, &inode_buf) == -1)
 		return -1;
+	*target = inode_buf;
 	return file_num;
 }
 
@@ -145,7 +148,7 @@ int get_inode(const char* path,struct Inode *target) {
 int get_inode_idir(const char* filename, int dir_num){
     struct Inode *dir_inode;
     // get dir inode (struct)
-    int flag = get_inode_iblk(dir_num, dir_inode);
+    int flag = get_inode_iblk(dir_num, &dir_inode);
     if (flag == -1)
         return -1;
 
@@ -255,7 +258,7 @@ int get_inode_idir(const char* filename, int dir_num){
 
 // get inode(struct) by inode number (in bitmap)
 // return -1 if something is wrong, else 0
-int get_inode_iblk(int inode_num, struct Inode* inode ){
+int get_inode_iblk(int inode_num, struct Inode** inode ){
     // calculate block id and offset within a block where inode locates
     int blk_id = INODE_BASE + inode_num/INODE_NUM_PBLK;
     int blk_offset = INODE_SIZE * (inode_num % INODE_NUM_PBLK);
@@ -267,7 +270,7 @@ int get_inode_iblk(int inode_num, struct Inode* inode ){
 		// $$
 		struct Inode *inode_buf = (struct Inode*)(buf + blk_offset);
         // *(inode) = *(inode_buf); //-----------------wrong
-		inode = inode_buf;
+		*inode = inode_buf;
         return 0;
     }
     else
@@ -368,7 +371,8 @@ int imap_opt(int mode, int inode_num){
 int mkfs(){
 
 	// write super block
-	char buf[BLOCK_SIZE];
+	char buf[BLOCK_SIZE+1];
+
 	memset(buf, 0, BLOCK_SIZE);
 	struct statvfs *stat = (struct statvfs*)buf;
 	stat->f_bsize = (unsigned long)BLOCK_SIZE; ////////////宏改名 BLOCK_MAX_SIZE 或者 TOTAL_BLK_SIZE
@@ -398,6 +402,7 @@ int mkfs(){
 		printf("error: disk write error\n");
 		return -1;
 	}
+	
 	// initialize inode blocks
 	memset(buf, -1, BLOCK_SIZE);
 	for (int i = INODE_BASE; i < FBLK_BASE; i++){
@@ -413,6 +418,7 @@ int mkfs(){
 		printf("error: root imap opt\n");
 		return -1;
 	}
+	
 	// write inode data block
 	struct Inode *inode = ((struct Inode *)buf)+ROOT_I; 
 	inode->mode = (__mode_t)DIRMODE;
@@ -421,6 +427,7 @@ int mkfs(){
 	inode->ctime = inode->atime;
 	inode->mtime = inode->atime;
 	inode->pointer_bmap = (unsigned char)0;
+	
 #ifdef DEBUG
 	inode->pointer_bmap = (unsigned char)1;/////测试read，不测试赋值为0
 	inode->dir_pointer[0] = 0;/////测试read，不测试时删去, ERROR, should be zero
@@ -445,7 +452,7 @@ int mkfs(){
 	// }
 	// /////上面的不要应该不影响
 	// 将"x.c"dir pair写入root 的db中
-	memset(buf, 0, BLOCK_SIZE);
+	memset(buf, 0, BLOCK_SIZE+1);
 	struct DirPair* dir_pair = (struct DirPair*) buf;
 	dir_pair->inode_num = 0;
 	char filename[]="x.c";
@@ -456,6 +463,7 @@ int mkfs(){
 		printf("error: disk wirte\n");
 		return -1;
 	}
+
 	// 将"x.c"的inode写入inode blocks
 	// write test file inode into data block
 	if (disk_read(INODE_BASE, buf)){
@@ -474,7 +482,8 @@ int mkfs(){
 		printf("error: disk write error\n");
 		return -1;
 	}
-	memset(buf,0,BLOCK_SIZE);
+
+	memset(buf,0,BLOCK_SIZE+1);
 	memcpy(buf,"ljtnb!!!",8);
 	if (disk_write(FBLK_BASE+1, buf)){
 		return -1;
@@ -482,7 +491,7 @@ int mkfs(){
 	////////修改了root inode的dir_pointer和pointer_bmap
 	///////////没有修改上面super block的fblk, ffree,仅供测试read
 #endif
-	
+	printf("Mkfs is called\n");
 	return 0;
 } 
 
@@ -499,7 +508,7 @@ int fs_getattr (const char *path, struct stat *attr)
 
     struct Inode *inode;
 
-	int errFlag = get_inode(path,inode);
+	int errFlag = get_inode(path,&inode);
 
 	switch (errFlag) {
 		case -1:
@@ -532,12 +541,16 @@ int fs_getattr (const char *path, struct stat *attr)
 }
 
 int fs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi){
+	(void) offset;
+	(void) fi;
+	// 路径不可为空
 	if(NULL == path) {
         printf("error: path is NULL, path's \"%s\"\n",path);
         return -ENOENT;
     }
+	// 读取path下dir的inode
     struct Inode *inode;
-	int errFlag = get_inode(path,inode);
+	int errFlag = get_inode(path, &inode);
 	switch (errFlag) {
 		case -1:
 			printf("error: disk read error, path's \"%s\"\n",path);
@@ -554,7 +567,79 @@ int fs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t off
 		default:
 			break;
 	}
-	
+	int dir_inode_num = errFlag;
+
+	// 判断是否为文件
+	if (inode->mode != DIRMODE){
+		printf("error: not a directory:%s\n", path);
+		return -1;
+	}
+	// 读取文件列表
+	// get dir inode pointer number
+    int dir_ptr_num = (dir_inode->pointer_bmap & 0xf);
+    int ind_ptr_num = (dir_inode->pointer_bmap & 0x30) >> 4;
+    int dual_ind_ptr_num = (dir_inode->pointer_bmap & 0x40) >> 6;
+    // 复制原来路径名
+	// 将"/xxx/xxx"、"/xxx/xxx/"统一形式为"/xxx/xxx/"
+	// 便于后面拼接文件所在路径以寻找文件inode
+	char dir_path[strlen(path)+ 2] = "";
+	char file_path[strlen(path) + NAME_MAX_LEN + 2];
+	memcpy(file_path, path, strlen(path));
+	if (path[strlen(path) - 1] != '/'){
+		dir_path[strlen(path)] = '/';
+		dir_path[strlen(path) + 1] = '\0';
+	}
+	else{
+		dir_path[strlen(path)] = '\0';
+	}
+
+
+
+	// 更新目录文件atime/////////////////
+	inode->atime = time(NULL);
+	if (disk_write(INODE_BASE + dir_inode_num/INODE_NUM_PBLK, inode-(dir_inode_num % INODE_NUM_PBLK))){
+		printf("error: disk write\n");
+		return -1;
+	}
+
+    int i, j, k, buf_offset = 0;
+	char buf[BLOCK_SIZE+1];
+    struct DirPair* dir_pair;
+
+	////////////////////todo
+    // read dir and compare file name to each dir_pair
+    for (i = 0; i < dir_ptr_num; i++){
+        // ptr used or not, if not, continue
+        if (dir_inode->dir_pointer[i] == (unsigned short)(-1)){
+            i--;
+            continue;
+        }
+		if (disk_read((unsigned short)FBLK_BASE + dir_inode->dir_pointer[i], buf))
+			return -1;
+        dir_pair = (struct DirPair *)buf;
+        for (j = 0; j < DIR_PAIR_PBLK; j++, dir_pair++){
+            // dir inode num initialize to -1
+            if (dir_pair->inode_num == -1)
+                continue;
+			
+			// concat for file path
+			memset(file_path, 0, sizeof(file_path));
+			strcat(file_path, dir_path);
+			strcat(file_path, dir_pair->name);
+			// get file stat
+			struct stat attr;
+            if (fs_getattr(file_path ,&attr)){
+				printf("error: fs_getattr\n");
+				return -1;
+			}
+			// write file stat into buffer
+			filler(buffer, dir_pair->name, &attr, buf_offset);
+			buf_offset += sizeof(attr);
+
+        }
+    }
+
+
 	printf("Readdir is called:%s\n", path);
 	return 0;
 }
@@ -563,7 +648,7 @@ int fs_read(const char *path, char *buffer, size_t size, off_t offset, struct fu
 {
 	(void) fi; //消除unused
 	struct Inode *inode;
-	int errFlag = get_inode(path,inode);
+	int errFlag = get_inode(path, &inode);
 	switch (errFlag) {
 		case -1:
 			printf("error: disk read error, path's \"%s\"\n",path);
@@ -580,8 +665,24 @@ int fs_read(const char *path, char *buffer, size_t size, off_t offset, struct fu
 		default:
 			break;
 	}
+	if (inode->mode	== (mode_t)DIRMODE) { ///有需要吗?
+		printf("Read: error, path's a directory. Path's \"%s\"\n",path);
+		return 0;
+	}
+	if (offset > size) {
+		printf("Read: error, offset > needed size. Path's \"%s\"\n",path);
+		return 0;
+	}
+	if (offset > inode->size) {
+		printf("Read: error, offset > real size of file. Path's \"%s\"\n",path);
+		return 0;
+	}
+	unsigned char ptr_bmap = inode->pointer_bmap;
+	unsigned int ptr_cnt0 = ptr_bmap & 0xf;
+	unsigned int ptr_cnt1 = (ptr_bmap >> 4) & 0x3;
+	unsigned int ptr_cnt2 = ptr_bmap >> 6;
 	
-	
+	if(1 )
 	printf("Read is called:%s\n",path);
 	return 0;
 }
