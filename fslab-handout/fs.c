@@ -12,6 +12,7 @@ Filesystem Lab disigned and implemented by Liang Junkai,RUC
 
 #define BLOCK_SIZE 4096
 #define BLOCK_NUM 65536
+#define FILE_MAX_NUM 32768
 #define DISK_SIZE (BLOCK_SIZE*BLOCK_NUM)
 
 #define DIRMODE S_IFDIR|0755
@@ -20,6 +21,7 @@ Filesystem Lab disigned and implemented by Liang Junkai,RUC
 //support function and macro
 
 //macro constant 
+#define DEBUG
 
 //bases of bitmaps,inode,free block (block offset):
 //inode bitmap base 
@@ -79,12 +81,13 @@ struct DirPair{
 /******* helper function begin *******/
 
 
-// get inode num from path
-// return value:
-// (-1) - disk read error
-// (-2) - filename or path not exist
-// (-3) - root dir not included
-// else return num
+/* get inode num from path
+ * return value:
+ * (-1) - disk read error
+ * (-2) - filename or path not exist
+ * (-3) - root dir not included
+ * else return num
+ */
 int get_inode(const char* path,struct Inode *target) {
 	// 不包含根目录，返回-3
 	if (strchr(path, '/') == NULL) //////////////////开局就错= =， strchr找不到返回的是NULL，应该是 == NULL才return
@@ -271,17 +274,224 @@ int get_inode_iblk(int inode_num, struct Inode* inode ){
     else
         return -1;
 }
+/* bitmap_opt - revise bitmap block
+ * bmap_num - block number of bitmap
+ * mode - 0 for freeing, 1 for allocating
+ * num - inode num of data block num
+ * error return -1, else 0
+ */
+int bitmap_opt(int mode, int num, int bmap_num){
+	// read in inode bitmap block
+	char buf[BLOCK_SIZE + 1] = "";
+	if (disk_read(bmap_num, buf)){
+		return -1;
+	}
+
+	int byte_id = num / 8;
+	int bit_id  = num % 8;
+	int opt = mode & 0x1;
+	char bmap_stat = (buf[byte_id] >> bit_id) & 0x1;
+	char byte_stat = (char)opt;
+
+	// this means trying to free a free inode 
+	// or allocate a allocated inode
+	if (byte_stat^bmap_stat == 0){
+		if (byte_stat == '\1'){// wrong on allocate a allocated struct
+			return -1;
+		}
+		////////free a free inode is not ok 也当错误情况处理吧，返回-2之类的//ok
+		else{
+			return -2;
+		}
+	}
+	// old_stat opt -> new_stat ; the better to change the opt
+	// 0 1 -> 1 ; 1 0 -> 0; 
+	// 0^(1|1) -> 1 ; 1^(1|0) -> 0; thus 无论free还是alloc都^1,free掉free和alloc给alloced都当错误处理
+	// change bit map
+	byte_stat = (buf[byte_id]) ^ ((0x1) << bit_id);/////
+	buf[byte_id] = byte_stat;
+	// write inode bitmap block
+	if (disk_write(bmap_num, buf)){
+		return -1;
+	}
+	return 0;
+}
+
+/* imap_opt - revise inode bitmap block
+ * mode - 0 for freeing, 1 for allocating
+ * num - inode num of data block num
+ * error return -1, else 0
+ */
+int imap_opt(int mode, int inode_num){
+	// read in inode bitmap block
+	char buf[BLOCK_SIZE + 1] = "";
+	if (disk_read(INODE_BMAP_BASE, buf)){
+		return -1;
+	}
+
+	int byte_id = inode_num / 8;
+	int bit_id  = inode_num % 8;
+	int opt = mode & 0x1;
+	char bmap_stat = (buf[byte_id] >> bit_id) & 0x1;
+	char byte_stat = (char)opt;
+
+	// this means trying to free a free inode 
+	// or allocate a allocated inode
+	if (byte_stat^bmap_stat == 0){
+		if (byte_stat == '\1'){// wrong on allocate a allocated inode
+			return -1;
+		}
+		else{
+			return -2;
+		}
+		////////free a free inode is not ok 也当错误情况处理吧，返回-2之类的//ok
+	}
+	// old_stat opt -> new_stat ; the better to change the opt
+	// 0 1 -> 1 ; 1 0 -> 0; 
+	// 0^(1|1) -> 1 ; 1^(1|0) -> 0; thus 无论free还是alloc都^1,free掉free和alloc给alloced都当错误处理
+	// change bit map
+	byte_stat = (buf[byte_id]) ^ ((0x1) << bit_id);/////
+	buf[byte_id] = byte_stat;
+	// write inode bitmap block
+	if (disk_write(INODE_BMAP_BASE, buf)){
+		return -1;
+	}
+	return 0;
+}
+
 
 /******* helper function end *******/
 
 
 
-
+struct statvfs {
+	unsigned long  f_bsize; //块大小
+	fsblkcnt_t     f_blocks;//块数量
+	fsblkcnt_t     f_bfree; //空闲块数量
+	fsblkcnt_t     f_bavail;//可用块数量
+	fsfilcnt_t     f_files; //文件节点数
+	fsfilcnt_t     f_ffree; //空闲节点数
+	fsfilcnt_t     f_favail;//可用节点数
+	unsigned long  f_namemax;//文件名长度上限
+};
 //Format the virtual block device in the following function
+//error returns -1, else 0
 int mkfs(){
+
+	// write super block
+	char buf[BLOCK_SIZE];
+	memset(buf, 0, BLOCK_SIZE);
+	struct statvfs *stat = (struct statvfs*)buf;
+	stat->f_bsize = (unsigned long)BLOCK_SIZE; ////////////宏改名 BLOCK_MAX_SIZE 或者 TOTAL_BLK_SIZE
+	stat->f_blocks = (__fsblkcnt_t)BLOCK_NUM;
+	stat->f_bfree = (__fsblkcnt_t)(BLOCK_NUM - FBLK_BASE);
+	stat->f_bavail = stat->f_bfree;
+	stat->f_files = (__fsblkcnt_t)FILE_MAX_NUM;
+	stat->f_ffree = (__fsblkcnt_t)(FILE_MAX_NUM - 1);
+	stat->f_favail = stat->f_ffree;
+	stat->f_namemax = (unsigned long)NAME_MAX_LEN;
+	if (disk_write(0, buf)){
+		printf("error: disk write error\n");
+		return -1;
+	}
+
+	// initialize inode bitmap and datablock bitmap
+	memset(buf, 0, BLOCK_SIZE);
+	if (disk_write(INODE_BMAP_BASE, buf)){
+		printf("error: disk write error\n");
+		return -1;
+	}
+	if (disk_write(FBLK_BMAP_BASE, buf)){
+		printf("error: disk write error\n");
+		return -1;
+	}
+	if (disk_write(FBLK_BMAP_BASE+1, buf)){
+		printf("error: disk write error\n");
+		return -1;
+	}
+	// initialize inode blocks
+	memset(buf, -1, BLOCK_SIZE);
+	for (int i = INODE_BASE; i < FBLK_BASE; i++){
+		if (disk_write(i, buf)){
+			printf("error: disk write error\n");
+			return -1;
+		}
+	}
+
+	// write root dir information into imap and inode blk
+	// write inode bitmap block
+	if (bitmap_opt(1, ROOT_I, INODE_BMAP_BASE)){
+		printf("error: root imap opt\n");
+		return -1;
+	}
+	// write inode data block
+	struct Inode *inode = ((struct Inode *)buf)+ROOT_I; 
+	indoe->mode = (__mode_t)DIRMODE;
+	inode->size = (__off_t)0;
+	inode->atime = time(NULL);
+	inode->ctime = inode->atime;
+	inode->mtime = inode->atime;
+	inode->pointer_bmap = (unsigned char)0;
+#ifdef DEBUG
+	inode->pointer_bmap = (unsigned char)1;/////测试read，不测试赋值为0
+	inode->dir_pointer[0] = FBLK_BASE;/////测试read，不测试时删去
+#endif
+
+	if (disk_write(INODE_BASE, buf)){
+		printf("error: disk write error\n");
+		return -1;
+	}
+
+#ifdef DEBUG
+	////////////support for read函数，root先初始化非空
+	/////test file:"/x.c" (inode num:0)
+	/////root data block:FBLK_BASE
+	// if (bitmap_opt(1, 0, INODE_BMAP_BASE)){
+	// 	printf("error: inode bmap opt\n");
+	// 	return -1;	
+	// }
+	// if (bitmap_opt(1, 0, FBLK_BMAP_BASE)){
+	// 	printf("error: db bmap opt\n");
+	// 	return -1;		
+	// }
+	// /////上面的不要应该不影响
+	// 将"x.c"dir pair写入root 的db中
+	memset(buf, 0, BLOCK_SIZE);
+	struct DirPair* dir_pair = buf;
+	dir_pair->inode_num = 0;
+	char filename[]="x.c";
+	memcpy(&dir_pair->name, filename, strlen(filename));
+	if (disk_write(FBLK_BASE, buf)){
+		printf("error: disk wirte\n");
+		return -1;
+	}
+	// 将"x.c"的inode写入inode blocks
+	// write test file inode into data block
+	if (disk_read(INODE_BASE, buf)){
+		printf("error: disk read\n");
+		return -1;
+	}
+	inode = ((struct Inode *)buf); 
+	indoe->mode = (__mode_t)DIRMODE;
+	inode->size = (__off_t)0;
+	inode->atime = time(NULL);
+	inode->ctime = inode->atime;
+	inode->mtime = inode->atime;
+	inode->pointer_bmap = (unsigned char)1;/////测试read
+	inode->dir_pointer[0] = 0;/////测试read
+	if (disk_write(INODE_BASE, buf)){
+		printf("error: disk write error\n");
+		return -1;
+	}
+	////////修改了root inode的dir_pointer和pointer_bmap
+	///////////没有修改上面super block的fblk, ffree,仅供测试read
+#endif
 	
 	return 0;
-}
+} 
+
+
+
 
 //Filesystem operations that you need to implement
 int fs_getattr (const char *path, struct stat *attr)
@@ -305,7 +515,7 @@ int fs_getattr (const char *path, struct stat *attr)
 			return -ENOENT;
 			break;
 		case -3:
-			printf("error: disk read error, path's \"%s\"\n",path);
+			printf("error: path error, path's \"%s\"\n",path);
 			return -ENOENT;
 			break;
 		default:
@@ -325,14 +535,34 @@ int fs_getattr (const char *path, struct stat *attr)
 	return 0;
 }
 
-int fs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi)
-{
+int fs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi){
 	printf("Readdir is called:%s\n", path);
 	return 0;
 }
 
 int fs_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi)
 {
+	（void) fi; //消除unused
+	struct Inode *inode;
+	int errFlag = get_inode(path,inode);
+	switch (errFlag) {
+		case -1:
+			printf("error: disk read error, path's \"%s\"\n",path);
+			return 0;
+			break;
+		case -2:
+			printf("error: path doesn't exist, path's \"%s\"\n",path);
+			return 0;
+			break;
+		case -3:
+			printf("error: disk read error, path's \"%s\"\n",path);
+			return 0;
+			break;
+		default:
+			break;
+	}
+	
+	
 	printf("Read is called:%s\n",path);
 	return 0;
 }
@@ -393,6 +623,7 @@ int fs_statfs (const char *path, struct statvfs *stat)
 
 int fs_open (const char *path, struct fuse_file_info *fi)
 {
+
 	printf("Open is called:%s\n",path);
 	return 0;
 }
