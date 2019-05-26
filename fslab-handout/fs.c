@@ -36,8 +36,7 @@ Filesystem Lab disigned and implemented by Liang Junkai,RUC
 #define INODE_NUM_PBLK 56 ///////////////////////////////
 //inode size
 #define INODE_SIZE 72///////////////////////////
-//root directory's inode offset, \
-In most U NIX file systems, the root inode number is 2.
+//root directory's inode offset, In most U NIX file systems, the root inode number is 2.
 #define ROOT_I  2
 
 //support struct related:
@@ -58,7 +57,7 @@ In most U NIX file systems, the root inode number is 2.
 //macro function
 
 //support struct
-typedef struct {
+struct Inode {
 	mode_t mode;
     off_t size;
     __time_t atime;
@@ -68,12 +67,12 @@ typedef struct {
     unsigned short dir_pointer[12];
     unsigned short ind_pointer[2];
     unsigned short doub_ind_pointer;    
-}Inode;
+};
 //
-typedef struct {
+struct DirPair{
 	int inode_num; // == -1 by default (if not a name)
 	char name[NAME_MAX_LEN+1];
-}DirPair;
+};
 
 
 
@@ -102,7 +101,7 @@ int get_inode(const char* path,struct Inode *target) {
 	size_t path_len = strlen(path);
 	// "/xxx/xxx/" or "/xxx/xxx" 都看作 "/xxx/xxx"，统一格式
 	if (path[path_len-1] == '/'){
-		path[path_len-1] = '\0';
+		// path[path_len-1] = '\0'; ///-----------------wrong, path is read only
 		path_len--;
 	}
     int i, j;
@@ -211,8 +210,9 @@ int get_inode_idir(const char* filename, int dir_num){
     if(dual_ind_ptr_num == 1){ /////////////wrong dual_ptr_num should be dual_ind_ptr_num 而且这只有0/1没必要
         char dptr_buf[BLOCK_SIZE + 1];
         if (dir_inode.doub_ind_pointer == (unsigned short)(-1)){ ////////////wrong,double indirect ptr就只有一个，这个不是数组，错了
-            continue;
-        }
+			return -2;
+		}
+
         if (disk_read((unsigned short)FBLK_BASE + dir_inode.doub_ind_pointer , dptr_buf) )////////// wrong,doub_pointer should be doub_ind_pointer
 			return -1;
 
@@ -264,8 +264,9 @@ int get_inode_iblk(int inode_num, struct Inode* inode ){
     int flag = disk_read(blk_id, buf);
     if (flag != 1){ //这里也有问题，他是正常返回0，错误返回1
 		// $$
-		struct Inode *inode_buf = (struct Inode*)(buf + blk_offset)
-        *(inode) = *(inode_buf);
+		struct Inode *inode_buf = (struct Inode*)(buf + blk_offset);
+        // *(inode) = *(inode_buf); //-----------------wrong
+		inode = inode_buf;
         return 0;
     }
     else
@@ -280,7 +281,7 @@ int get_inode_iblk(int inode_num, struct Inode* inode ){
 //Format the virtual block device in the following function
 int mkfs()
 {
-
+	
 	return 0;
 }
 
@@ -288,18 +289,39 @@ int mkfs()
 int fs_getattr (const char *path, struct stat *attr)
 {
     if(NULL == path) {
-        printf("path is NULL\n");
+        printf("error: path is NULL, path's \"%s\"\n",path);
         return -ENOENT;
     }
 
-    size_t path_len = strlen(path);
+    struct Inode inode;
 
-    if(path[path_len-1] == '/') {
-        attr.st_mode = 
-    }
-    else {
+	int errFlag = get_inode(path,&inode);
 
-    }
+	switch (errFlag) {
+		case -1:
+			printf("error: disk read error, path's \"%s\"\n",path);
+			return -ENOENT;
+			break;
+		case -2:
+			printf("error: path doesn't exist, path's \"%s\"\n",path);
+			return -ENOENT;
+			break;
+		case -3:
+			printf("error: disk read error, path's \"%s\"\n",path);
+			return -ENOENT;
+			break;
+		default:
+			break;
+	}
+
+	attr->st_mode = inode.mode;
+	attr->st_nlink = 1;
+	attr->st_uid = getuid();
+	attr->st_gid = getgid();
+	attr->st_size = inode.size;
+	attr->st_atime = inode.atime;
+	attr->st_mtime = inode.mtime;
+	attr->st_ctime = inode.ctime;
 
 	printf("Getattr is called:%s\n",path);
 	return 0;
@@ -343,7 +365,7 @@ int fs_unlink (const char *path)
 
 int fs_rename (const char *oldpath, const char *newname)
 {
-	printf("Rename is called:%s\n",path);
+	printf("Rename is called:%s\n",oldpath);
 	return 0;
 }
 
@@ -442,6 +464,8 @@ int main(int argc, char *argv[])
 /******************* DUMP *******************/
 /******************* DUMP *******************/
 /******************* DUMP *******************/
+
+/*
 
 //wrong, 但可以通过微调使用
 //错误原因: 以为文件夹的路径名结尾必定带有'/'
@@ -620,3 +644,6 @@ int find_inode_inDir(const char* name,struct Inode* dir_inode) {
 	}
 	return -2;
 }
+
+
+*/
