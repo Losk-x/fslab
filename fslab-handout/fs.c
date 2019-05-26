@@ -434,7 +434,7 @@ int mkfs(){
 	inode->pointer_bmap = (unsigned char)0;
 #ifdef DEBUG
 	inode->pointer_bmap = (unsigned char)1;/////测试read，不测试赋值为0
-	inode->dir_pointer[0] = FBLK_BASE;/////测试read，不测试时删去
+	inode->dir_pointer[0] = 0;/////测试read，不测试时删去, ERROR, should be zero
 #endif
 
 	if (disk_write(INODE_BASE, buf)){
@@ -457,10 +457,12 @@ int mkfs(){
 	// /////上面的不要应该不影响
 	// 将"x.c"dir pair写入root 的db中
 	memset(buf, 0, BLOCK_SIZE);
-	struct DirPair* dir_pair = buf;
+	struct DirPair* dir_pair = (struct DirPair*) buf;
 	dir_pair->inode_num = 0;
 	char filename[]="x.c";
-	memcpy(&dir_pair->name, filename, strlen(filename));
+	memcpy(&(dir_pair->name), filename, strlen(filename)); ////////////// '\0'
+	dir_pair[strlen(filename)] = '\0';
+	
 	if (disk_write(FBLK_BASE, buf)){
 		printf("error: disk wirte\n");
 		return -1;
@@ -472,15 +474,20 @@ int mkfs(){
 		return -1;
 	}
 	inode = ((struct Inode *)buf); 
-	indoe->mode = (__mode_t)DIRMODE;
-	inode->size = (__off_t)0;
+	indoe->mode = (__mode_t)REGMODE;
+	inode->size = (__off_t)8;
 	inode->atime = time(NULL);
 	inode->ctime = inode->atime;
 	inode->mtime = inode->atime;
 	inode->pointer_bmap = (unsigned char)1;/////测试read
-	inode->dir_pointer[0] = 0;/////测试read
+	inode->dir_pointer[0] = 1;/////测试read
 	if (disk_write(INODE_BASE, buf)){
 		printf("error: disk write error\n");
+		return -1;
+	}
+	memset(buf,0,BLOCK_SIZE);
+	memcpy(buf,"ljtnb!!!",8);
+	if (disk_write(FBLK_BASE+1, buf)){
 		return -1;
 	}
 	////////修改了root inode的dir_pointer和pointer_bmap
@@ -536,6 +543,29 @@ int fs_getattr (const char *path, struct stat *attr)
 }
 
 int fs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi){
+	if(NULL == path) {
+        printf("error: path is NULL, path's \"%s\"\n",path);
+        return -ENOENT;
+    }
+    struct Inode *inode;
+	int errFlag = get_inode(path,inode);
+	switch (errFlag) {
+		case -1:
+			printf("error: disk read error, path's \"%s\"\n",path);
+			return -ENOENT;
+			break;
+		case -2:
+			printf("error: path doesn't exist, path's \"%s\"\n",path);
+			return -ENOENT;
+			break;
+		case -3:
+			printf("error: path error, path's \"%s\"\n",path);
+			return -ENOENT;
+			break;
+		default:
+			break;
+	}
+	
 	printf("Readdir is called:%s\n", path);
 	return 0;
 }
