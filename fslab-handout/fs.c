@@ -158,7 +158,7 @@ int get_inode_idir(const char* filename, int dir_num){
     // read dir and compare file name to each dir_pair
     for (i = 0; i < dir_ptr_num; i++){
         // ptr used or not, if not, continue
-        if (dir_inode->dir_pointer[i] == (unsigned short)(-1)){
+        if (dir_inode->dir_pointer[i] == (unsigned地方 short)(-1)){
             i--;
             continue;
         }
@@ -278,8 +278,7 @@ int get_inode_iblk(int inode_num, struct Inode* inode ){
 
 
 //Format the virtual block device in the following function
-int mkfs()
-{
+int mkfs(){
 	
 	return 0;
 }
@@ -292,9 +291,9 @@ int fs_getattr (const char *path, struct stat *attr)
         return -ENOENT;
     }
 
-    struct Inode inode;
+    struct Inode *inode;
 
-	int errFlag = get_inode(path,&inode);
+	int errFlag = get_inode(path,inode);
 
 	switch (errFlag) {
 		case -1:
@@ -313,14 +312,14 @@ int fs_getattr (const char *path, struct stat *attr)
 			break;
 	}
 
-	attr->st_mode = inode.mode;
+	attr->st_mode = inode->mode;
 	attr->st_nlink = 1;
 	attr->st_uid = getuid();
 	attr->st_gid = getgid();
-	attr->st_size = inode.size;
-	attr->st_atime = inode.atime;
-	attr->st_mtime = inode.mtime;
-	attr->st_ctime = inode.ctime;
+	attr->st_size = inode->size;
+	attr->st_atime = inode->atime;
+	attr->st_mtime = inode->mtime;
+	attr->st_ctime = inode->ctime;
 
 	printf("Getattr is called:%s\n",path);
 	return 0;
