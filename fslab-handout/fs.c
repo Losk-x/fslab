@@ -99,14 +99,13 @@ int get_inode(const char* path,struct Inode *target) {
 		return ROOT_I;
 	}
 
-	int dir_flag = 0;
 	size_t path_len = strlen(path);
 	// "/xxx/xxx/" or "/xxx/xxx" 都看作 "/xxx/xxx"，统一格式
 	if (path[path_len-1] == '/'){
 		// path[path_len-1] = '\0'; ///-----------------wrong, path is read only
 		path_len--;
 	}
-    int i, j;
+    int i;
 	// start point to the prev '/', end point to the next '/'
 	// filename lies between them
     int start_ptr=0, end_ptr=0;
@@ -161,7 +160,7 @@ int get_inode_idir(const char* filename, int dir_num){
     // read dir and compare file name to each dir_pair
     for (i = 0; i < dir_ptr_num; i++){
         // ptr used or not, if not, continue
-        if (dir_inode->dir_pointer[i] == (unsigned地方 short)(-1)){
+        if (dir_inode->dir_pointer[i] == (unsigned short)(-1)){
             i--;
             continue;
         }
@@ -295,7 +294,7 @@ int bitmap_opt(int mode, int num, int bmap_num){
 
 	// this means trying to free a free inode 
 	// or allocate a allocated inode
-	if (byte_stat^bmap_stat == 0){
+	if ((byte_stat^bmap_stat) == 0){
 		if (byte_stat == '\1'){// wrong on allocate a allocated struct
 			return -1;
 		}
@@ -337,7 +336,7 @@ int imap_opt(int mode, int inode_num){
 
 	// this means trying to free a free inode 
 	// or allocate a allocated inode
-	if (byte_stat^bmap_stat == 0){
+	if ((byte_stat^bmap_stat) == 0){
 		if (byte_stat == '\1'){// wrong on allocate a allocated inode
 			return -1;
 		}
@@ -364,16 +363,6 @@ int imap_opt(int mode, int inode_num){
 
 
 
-struct statvfs {
-	unsigned long  f_bsize; //块大小
-	fsblkcnt_t     f_blocks;//块数量
-	fsblkcnt_t     f_bfree; //空闲块数量
-	fsblkcnt_t     f_bavail;//可用块数量
-	fsfilcnt_t     f_files; //文件节点数
-	fsfilcnt_t     f_ffree; //空闲节点数
-	fsfilcnt_t     f_favail;//可用节点数
-	unsigned long  f_namemax;//文件名长度上限
-};
 //Format the virtual block device in the following function
 //error returns -1, else 0
 int mkfs(){
@@ -426,7 +415,7 @@ int mkfs(){
 	}
 	// write inode data block
 	struct Inode *inode = ((struct Inode *)buf)+ROOT_I; 
-	indoe->mode = (__mode_t)DIRMODE;
+	inode->mode = (__mode_t)DIRMODE;
 	inode->size = (__off_t)0;
 	inode->atime = time(NULL);
 	inode->ctime = inode->atime;
@@ -461,7 +450,7 @@ int mkfs(){
 	dir_pair->inode_num = 0;
 	char filename[]="x.c";
 	memcpy(&(dir_pair->name), filename, strlen(filename)); ////////////// '\0'
-	dir_pair[strlen(filename)] = '\0';
+	dir_pair->name[strlen(filename)] = '\0';
 	
 	if (disk_write(FBLK_BASE, buf)){
 		printf("error: disk wirte\n");
@@ -474,7 +463,7 @@ int mkfs(){
 		return -1;
 	}
 	inode = ((struct Inode *)buf); 
-	indoe->mode = (__mode_t)REGMODE;
+	inode->mode = (__mode_t)REGMODE;
 	inode->size = (__off_t)8;
 	inode->atime = time(NULL);
 	inode->ctime = inode->atime;
@@ -572,7 +561,7 @@ int fs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t off
 
 int fs_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi)
 {
-	（void) fi; //消除unused
+	(void) fi; //消除unused
 	struct Inode *inode;
 	int errFlag = get_inode(path,inode);
 	switch (errFlag) {
