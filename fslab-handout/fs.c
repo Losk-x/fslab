@@ -387,13 +387,13 @@ int bmap_cnt(int bmap_blk_num){
 	char mask = 0x11;
 	int helpCnt = 0;
 	// for each byte, count its bit and sum up
-	for (int i = 0; i < BLOCK_NUM; i++){
+	for (int i = 0; i < BLOCK_SIZE; i++){
 		helpCnt = (int)(buf[i] & mask);
 		helpCnt += (int)((buf[i]>>1) & mask);
 		helpCnt += (int)((buf[i]>>2) & mask);
 		helpCnt += (int)((buf[i]>>3) & mask);
 		helpCnt = (helpCnt + (helpCnt >> 4)) & 0xF;
-		counter += helpCnt;
+		counter += (int)helpCnt;
 	}
 	return ((int) BLOCK_SIZE) * 8 - counter;
 }
@@ -468,6 +468,10 @@ int mkfs(){
 	#ifdef DEBUG
 	inode->pointer_bmap = (unsigned char)1;/////测试read，不测试赋值为0
 	inode->dir_pointer[0] = 0;/////测试read，不测试时删去, ERROR, should be zero
+	if (bitmap_opt(1, 0, FBLK_BMAP_BASE)){
+		printf("error: bmap opt\n");
+		return -1;
+	}
 	#endif
 
 	if (disk_write(INODE_BASE, buf)){
@@ -502,6 +506,10 @@ int mkfs(){
 	}
 
 	// 将"x.c"的inode写入inode blocks
+	if (bitmap_opt(1, 0, INODE_BMAP_BASE)){
+		printf("error: bmap opt\n");
+		return -1;
+	}
 	// write test file inode into data block
 	if (disk_read(INODE_BASE, buf)){
 		printf("error: disk read\n");
@@ -520,6 +528,10 @@ int mkfs(){
 		return -1;
 	}
 
+	if (bitmap_opt(1, 1, FBLK_BMAP_BASE)){
+		printf("error: bmap opt\n");
+		return -1;
+	}
 	memset(buf,0,BLOCK_SIZE+1);
 	memcpy(buf,"ljtnb!!!",8);
 	if (disk_write(FBLK_BASE+1, buf)){
@@ -532,6 +544,27 @@ int mkfs(){
 	return 0;
 } 
 
+int fs_statfs (const char *path, struct statvfs *stat){
+	(void) path;//没有意义的参数
+	
+
+	#ifdef DEBUG
+	printf("stafs: is calling\n");
+	#endif
+
+	stat->f_bsize = (unsigned long)BLOCK_SIZE;
+	stat->f_blocks = (__fsblkcnt_t)(BLOCK_NUM);
+	stat->f_bfree = (__fsblkcnt_t)(bmap_cnt(FBLK_BMAP_BASE) + bmap_cnt(FBLK_BMAP_BASE +1));
+	stat->f_bfree -= (__fsblkcnt_t)(FBLK_BASE);
+	stat->f_bavail = stat->f_bfree;
+	stat->f_files = (__fsfilcnt_t)(FILE_MAX_NUM);
+	stat->f_ffree = (__fsblkcnt_t)(bmap_cnt(INODE_BMAP_BASE));
+	stat->f_favail = stat->f_bfree;
+	stat->f_namemax = (unsigned long)NAME_MAX_LEN;
+
+	printf("Statfs is called:%s\n",path);
+	return 0;
+}
 
 
 
