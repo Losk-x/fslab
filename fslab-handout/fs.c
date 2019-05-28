@@ -374,17 +374,19 @@ int imap_opt(int mode, int inode_num){
 
 
 /* bmap_cnt - count free bit numbers in bitmap
- * return numbers if nothing wrong, else -1
+ * return free numbers if nothing wrong, else -1
  */
 int bmap_cnt(int bmap_blk_num){
 	char buf[BLOCK_SIZE + 1];
+	// read in bmap block
 	if (disk_read(bmap_blk_num, buf)){
 		printf("error: disk read\n");
 		return -1;
 	}
 	int counter = 0;
-	char maks = 0x33;
+	char mask = 0x11;
 	int helpCnt = 0;
+	// for each byte, count its bit and sum up
 	for (int i = 0; i < BLOCK_NUM; i++){
 		helpCnt = (int)(buf[i] & mask);
 		helpCnt += (int)((buf[i]>>1) & mask);
@@ -393,7 +395,7 @@ int bmap_cnt(int bmap_blk_num){
 		helpCnt = (helpCnt + (helpCnt >> 4)) & 0xF;
 		counter += helpCnt;
 	}
-	return counter;
+	return ((int) BLOCK_SIZE) * 8 - counter;
 }
 
 
