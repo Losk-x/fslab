@@ -15,8 +15,8 @@ Filesystem Lab disigned and implemented by Liang Junkai,RUC
 #define FILE_MAX_NUM 32768
 #define DISK_SIZE (BLOCK_SIZE*BLOCK_NUM)
 
-#define DIRMODE S_IFDIR|0755
-#define REGMODE S_IFREG|0644
+#define DIRMODE (S_IFDIR|0755)
+#define REGMODE (S_IFREG|0644)
 
 //support function and macro
 
@@ -51,12 +51,23 @@ Filesystem Lab disigned and implemented by Liang Junkai,RUC
 //In directory block,
 //name:inode pair per blk
 #define DIR_PAIR_PBLK	128
+//各项指针的临界大小, 写入时按顺序写入(先direct再indirect最后double indirect)
+//12*4096
+#define DIRP_MAX_SIZE	49152	
+//2*(4096/2)*4096
+#define	INDP_MAX_SIZE	16777216
+//1*(4096/2)*(4096/2)*4096
+#define DINDP_MAX_SIZE	17179869184
+//最大文件的大小
+#define	FILE_MAX_SIZE	17179869184
 
 //In pointer block,
 //"pointer" per blk, 初始化全是-1（即无内容 65536），pointer基于FBLK_BASE，所以不会有65536个
 #define PTR_MAX_PBLK	2048
 
 //macro function
+#define MIN(_min1,_min2)	((_min1) > (_min2) ? (_min2) : (_min1))
+#define MAX(_max1,_max2)	((_max1) > (_max2) ? (_max1) : (_max2))
 
 //support struct
 struct Inode {
@@ -192,15 +203,15 @@ int get_inode_idir(const char* filename, int dir_num){
 			return -1;
 		// pointer number in the indirect pointer block
         // unsigned int ptr_num = (unsigned int)((short)ptr_buf);
-        for (k = 0; k < PTR_MAX_PBLK; k++){ /////////////////wrong, DIR_PAIR_PBLK should be PTR_MAX_PBLK
+        for (j = 0; j < PTR_MAX_PBLK; j++){ /////////////////wrong, DIR_PAIR_PBLK should be PTR_MAX_PBLK
 			unsigned short *short_ptr = (unsigned short *)ptr_buf;
-            if (*(ptr_buf + k) == (unsigned short)(-1)){ //////////////wrong, should be *(short_ptr+k)
+            if (*(ptr_buf + j) == (unsigned short)(-1)){ //////////////wrong, should be *(short_ptr+k)
                 continue;
             }
-            if (disk_read((unsigned short)FBLK_BASE + *(short_ptr + k), buf)) //////////warning: 没有检测回来的值是否是0/1
+            if (disk_read((unsigned short)FBLK_BASE + *(short_ptr + j), buf)) //////////warning: 没有检测回来的值是否是0/1
 				return -1;
 			dir_pair = (struct DirPair *)buf;
-            for (j = 0; j < DIR_PAIR_PBLK; j++, dir_pair++){
+            for (k = 0; k < DIR_PAIR_PBLK; k++, dir_pair++){
                 // if names match, return inode num
                 if (dir_pair->inode_num == -1)
                     continue;
@@ -362,6 +373,30 @@ int imap_opt(int mode, int inode_num){
 }
 
 
+/* bmap_cnt - count free bit numbers in bitmap
+ * return numbers if nothing wrong, else -1
+ */
+int bmap_cnt(int bmap_blk_num){
+	char buf[BLOCK_SIZE + 1];
+	if (disk_read(bmap_blk_num, buf)){
+		printf("error: disk read\n");
+		return -1;
+	}
+	int counter = 0;
+	char maks = 0x33;
+	int helpCnt = 0;
+	for (int i = 0; i < BLOCK_NUM; i++){
+		helpCnt = (int)(buf[i] & mask);
+		helpCnt += (int)((buf[i]>>1) & mask);
+		helpCnt += (int)((buf[i]>>2) & mask);
+		helpCnt += (int)((buf[i]>>3) & mask);
+		helpCnt = (helpCnt + (helpCnt >> 4)) & 0xF;
+		counter += helpCnt;
+	}
+	return counter;
+}
+
+
 /******* helper function end *******/
 
 
@@ -428,17 +463,17 @@ int mkfs(){
 	inode->mtime = inode->atime;
 	inode->pointer_bmap = (unsigned char)0;
 	
-#ifdef DEBUG
+	#ifdef DEBUG
 	inode->pointer_bmap = (unsigned char)1;/////测试read，不测试赋值为0
 	inode->dir_pointer[0] = 0;/////测试read，不测试时删去, ERROR, should be zero
-#endif
+	#endif
 
 	if (disk_write(INODE_BASE, buf)){
 		printf("error: disk write error\n");
 		return -1;
 	}
 
-#ifdef DEBUG
+	#ifdef DEBUG
 	////////////support for read函数，root先初始化非空
 	/////test file:"/x.c" (inode num:0)
 	/////root data block:FBLK_BASE
@@ -452,7 +487,7 @@ int mkfs(){
 	// }
 	// /////上面的不要应该不影响
 	// 将"x.c"dir pair写入root 的db中
-	memset(buf, 0, BLOCK_SIZE+1);
+	memset(buf, -1, BLOCK_SIZE+1); //////这里也应该初始化为-1  ////写入datablock时buffer都应去置为-1
 	struct DirPair* dir_pair = (struct DirPair*) buf;
 	dir_pair->inode_num = 0;
 	char filename[]="x.c";
@@ -490,7 +525,7 @@ int mkfs(){
 	}
 	////////修改了root inode的dir_pointer和pointer_bmap
 	///////////没有修改上面super block的fblk, ffree,仅供测试read
-#endif
+	#endif
 	printf("Mkfs is called\n");
 	return 0;
 } 
@@ -541,123 +576,259 @@ int fs_getattr (const char *path, struct stat *attr)
 }
 
 int fs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi){
+	#ifdef DEBUG
+	printf("readdir: is calling\n");
+	#endif
+	
 	(void) offset;
 	(void) fi;
-	// 路径不可为空
+	// 判断路径是否为空，为空则报错
 	if(NULL == path) {
-        printf("error: path is NULL, path's \"%s\"\n",path);
+        printf("error: path is NULL, path is \"%s\"\n",path);
         return -ENOENT;
     }
-	// 读取path下dir的inode
-    struct Inode *inode;
-	int errFlag = get_inode(path, &inode);
+	// 路径正常，则读取path下dir的inode
+	// inode的地址写入inode指针中
+    struct Inode *dir_inode;
+	int errFlag = get_inode(path, &dir_inode);
 	switch (errFlag) {
 		case -1:
-			printf("error: disk read error, path's \"%s\"\n",path);
+			printf("error: disk read error, path is \"%s\"\n",path);
 			return -ENOENT;
 			break;
 		case -2:
-			printf("error: path doesn't exist, path's \"%s\"\n",path);
+			printf("error: path doesn't exist, path is \"%s\"\n",path);
 			return -ENOENT;
 			break;
 		case -3:
-			printf("error: path error, path's \"%s\"\n",path);
+			printf("error: path error, path is \"%s\"\n",path);
 			return -ENOENT;
 			break;
 		default:
 			break;
 	}
+	// errFlag正常时即为dir_inode_num
 	int dir_inode_num = errFlag;
 
-	// 判断是否为文件
-	if (inode->mode != DIRMODE){
-		printf("error: not a directory:%s\n", path);
+	// 判断根据path读取的inode是否为目录
+	if (dir_inode->mode == (__mode_t)(REGMODE)){
+		printf("error: not a directory:%s (readdir)\n", path);
 		return -1;
 	}
+	
 	// 读取文件列表
 	// get dir inode pointer number
+	// 这一段复制之前用过的
     int dir_ptr_num = (dir_inode->pointer_bmap & 0xf);
     int ind_ptr_num = (dir_inode->pointer_bmap & 0x30) >> 4;
     int dual_ind_ptr_num = (dir_inode->pointer_bmap & 0x40) >> 6;
-    // 复制原来路径名
+    
+	// 复制原来路径名
 	// 将"/xxx/xxx"、"/xxx/xxx/"统一形式为"/xxx/xxx/"
 	// 便于后面拼接文件所在路径以寻找文件inode
-	char dir_path[strlen(path)+ 2] = "";
-	char file_path[strlen(path) + NAME_MAX_LEN + 2];
-	memcpy(file_path, path, strlen(path));
-	if (path[strlen(path) - 1] != '/'){
-		dir_path[strlen(path)] = '/';
-		dir_path[strlen(path) + 1] = '\0';
+	// been tested
+	int path_len = strlen(path);
+	char dir_path[256] = "";
+	memcpy(dir_path, path, path_len);
+	if (path[path_len - 1] != '/'){
+		dir_path[path_len] = '/';
+		dir_path[path_len + 1] = '\0';
+		path_len++;
 	}
 	else{
-		dir_path[strlen(path)] = '\0';
+		dir_path[path_len] = '\0';
 	}
-
 
 
 	// 更新目录文件atime/////////////////
-	inode->atime = time(NULL);
-	if (disk_write(INODE_BASE + dir_inode_num/INODE_NUM_PBLK, inode-(dir_inode_num % INODE_NUM_PBLK))){
+	dir_inode->atime = time(NULL);
+	if (disk_write(INODE_BASE + dir_inode_num/INODE_NUM_PBLK, dir_inode-(dir_inode_num % INODE_NUM_PBLK))){
 		printf("error: disk write\n");
 		return -1;
 	}
 
     int i, j, k, buf_offset = 0;
 	char buf[BLOCK_SIZE+1];
+	char file_path[256] = "";
     struct DirPair* dir_pair;
+	//filler(buffer, "", NULL, 0);
+	//filler(buffer, "..", NULL, 0);
 
-	////////////////////todo
     // read dir and compare file name to each dir_pair
+	// 1. direct data block
     for (i = 0; i < dir_ptr_num; i++){
-        // ptr used or not, if not, continue
+        // printf("readdir:  dir ptr\n");
+	    // ptr used or not, if not, continue
         if (dir_inode->dir_pointer[i] == (unsigned short)(-1)){
             i--;
             continue;
         }
+		// read in data block
 		if (disk_read((unsigned short)FBLK_BASE + dir_inode->dir_pointer[i], buf))
 			return -1;
+
+		// initialize dir_pair ptr to the beginnning of the buffer
         dir_pair = (struct DirPair *)buf;
+		// compare file name to dir_pairs in this blockm
         for (j = 0; j < DIR_PAIR_PBLK; j++, dir_pair++){
             // dir inode num initialize to -1
-            if (dir_pair->inode_num == -1)
+            if (dir_pair->inode_num == (-1))
                 continue;
-			
+
 			// concat for file path
+			// been tested
 			memset(file_path, 0, sizeof(file_path));
 			strcat(file_path, dir_path);
 			strcat(file_path, dir_pair->name);
-			// get file stat
+			
 			struct stat attr;
+			// call fs_getattr to get file stat
+            // printf("readdir: %d %d %s %x\n", j, dir_pair->inode_num, dir_pair->name, dir_pair);
             if (fs_getattr(file_path ,&attr)){
 				printf("error: fs_getattr\n");
 				return -1;
 			}
+			
 			// write file stat into buffer
-			filler(buffer, dir_pair->name, &attr, buf_offset);
-			buf_offset += sizeof(attr);
+			filler(buffer, dir_pair->name, NULL, 0);
 
         }
     }
 
 
+	// 2. read indirect datablock
+    for (i = 0; i < ind_ptr_num; i++){
+		// if indirect pointer isn't used, continue to next indirect pointer
+        // printf("readdir:  indir ptr\n");
+        if (dir_inode->ind_pointer[i] == (unsigned short)(-1)){
+            i--;
+            continue;
+        }
+        char ptr_buf[BLOCK_SIZE + 1];
+		// read in indirect pointer block
+        if (disk_read((unsigned short)FBLK_BASE + dir_inode->ind_pointer[i], ptr_buf)) 
+			return -1;
+
+		// pointer number in the indirect pointer block
+        // unsigned int ptr_num = (unsigned int)((short)ptr_buf);
+		unsigned short *short_ptr = (unsigned short *)ptr_buf;
+        for (j = 0; j < PTR_MAX_PBLK; j++){ 
+            // if the pointer isn't used, continue to next pointer
+			if (*(ptr_buf + j) == (unsigned short)(-1)){
+                continue;
+            }
+            
+			// read in direct pointer data block
+			if (disk_read((unsigned short)FBLK_BASE + *(short_ptr + j), buf))
+				return -1;
+			
+			dir_pair = (struct DirPair *)buf;
+            for (k = 0; k < DIR_PAIR_PBLK; k++, dir_pair++){
+                // if the dir_pair inode isn't used, continue to next dir_pair
+				if (dir_pair->inode_num == -1)
+                    continue;
+				
+				// concat for file path
+				// been tested
+				memset(file_path, 0, sizeof(file_path));
+				strcat(file_path, dir_path);
+				strcat(file_path, dir_pair->name);
+				
+				struct stat attr;
+				// call fs_getattr to get file stat
+				if (fs_getattr(file_path ,&attr)){
+					printf("error: fs_getattr\n");
+					return -1;
+				}
+				
+				// write file stat into buffer
+				filler(buffer, dir_pair->name, NULL, 0);
+            }
+        }
+    }
+
+	// 3. read double indirect datablock	
+	if((dual_ind_ptr_num == 1) && (dir_inode->doub_ind_pointer == (unsigned short)(-1))){
+        // printf("readdir:  double indir ptr\n");
+        char dptr_buf[BLOCK_SIZE + 1];
+		// if double indirect pointer isn't used, continue
+		// read in double pointer datablock
+        if (disk_read((unsigned short)FBLK_BASE + dir_inode->doub_ind_pointer , dptr_buf))
+			return -1;
+
+		unsigned short *dshort_ptr = (unsigned short *)dptr_buf; 
+		// for each indirect pointer, read datablock
+        for (i = 0; i < PTR_MAX_PBLK; i++){ 
+			// if this indirect pointer isn't used, continue
+            if (*(dshort_ptr + i) == (unsigned short)(-1)){
+                continue;
+            }
+
+			// read in indirect pointer datablock
+            char ptr_buf[BLOCK_SIZE + 1];
+            if (disk_read(((unsigned short)FBLK_BASE + *(dshort_ptr + i)), ptr_buf))
+				return -1;
+
+			// read in direct pointer datablock
+			unsigned short *short_ptr = (unsigned short *)ptr_buf;
+            for (j = 0; j < PTR_MAX_PBLK; j++){
+				// if direct pointer isn't used, continue to next one
+                if (*(short_ptr + j) == (unsigned short)(-1)){
+                    continue;
+                }
+				// read in datablocks
+                if (disk_read((unsigned short)FBLK_BASE + *(short_ptr + j), buf)) /////////warning: 没有检测回来的值是否是0/1
+					return -1;
+				dir_pair = (struct DirPair *)buf;
+                for (k = 0; k < DIR_PAIR_PBLK; k++, dir_pair++){ 
+					// if the dir_pair inode isn't used, continue to next dir_pair
+					if (dir_pair->inode_num == -1)
+						continue;
+					
+					
+					// concat for file path
+					// been tested
+					memset(file_path, 0, sizeof(file_path));
+					strcat(file_path, dir_path);
+					strcat(file_path, dir_pair->name);
+					
+					struct stat attr;
+					// call fs_getattr to get file stat
+					if (fs_getattr(file_path ,&attr)){
+						printf("error: fs_getattr\n");
+						return -1;
+					}
+					
+					// write file stat into buffer
+					filler(buffer, dir_pair->name, NULL, 0);
+                }
+            }
+        }
+    }
 	printf("Readdir is called:%s\n", path);
 	return 0;
 }
 
+
 int fs_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi)
 {
+	//size means the required size
+	#ifdef DEBUG
+	printf("Read: is calling. Path:%s\n",path);
+	#endif
 	(void) fi; //消除unused
 	struct Inode *inode;
 	int errFlag = get_inode(path, &inode);
+	
 	switch (errFlag) {
 		case -1:
 			printf("error: disk read error, path's \"%s\"\n",path);
 			return 0;
 			break;
-		case -2:
+		case -2: 
 			printf("error: path doesn't exist, path's \"%s\"\n",path);
 			return 0;
-			break;
+			break; 
 		case -3:
 			printf("error: disk read error, path's \"%s\"\n",path);
 			return 0;
@@ -665,12 +836,8 @@ int fs_read(const char *path, char *buffer, size_t size, off_t offset, struct fu
 		default:
 			break;
 	}
-	if (inode->mode	== (mode_t)DIRMODE) { ///有需要吗?
+	if (inode->mode	== ((__mode_t)(DIRMODE)) ) { ///有需要吗?
 		printf("Read: error, path's a directory. Path's \"%s\"\n",path);
-		return 0;
-	}
-	if (offset > size) {
-		printf("Read: error, offset > needed size. Path's \"%s\"\n",path);
 		return 0;
 	}
 	if (offset > inode->size) {
@@ -681,40 +848,156 @@ int fs_read(const char *path, char *buffer, size_t size, off_t offset, struct fu
 	unsigned int ptr_cnt0 = ptr_bmap & 0xf;
 	unsigned int ptr_cnt1 = (ptr_bmap >> 4) & 0x3;
 	unsigned int ptr_cnt2 = ptr_bmap >> 6;
-	
-	if(1 )
+	size_t nleft = size; //size that left to read
+	nleft = MIN(nleft,(inode->size-offset));
+	size_t ngot = 0; //size that is atually read
+
+	//direct pointer
+	if (offset < DIRP_MAX_SIZE) {
+		//for example: blk_size = 4, offset = 4, ptr_start_index = 1, blk_start_index = 0 (0base)
+		int ptr_start_index = offset / BLOCK_SIZE;
+		int blk_start_index = offset % BLOCK_SIZE;
+		//not atual end index, may be +1 or even +2(size = m*blk_size, blk_start_index = 0)
+		int ptr_end_index = ptr_start_index + (size / BLOCK_SIZE) + 1;
+		ptr_end_index = MIN(ptr_end_index, (DIR_P_NUM-1));
+		for(int i = ptr_start_index;i <= ptr_end_index && nleft > 0;i++) {
+			if(inode->dir_pointer[i] == ((unsigned short)-1) ) {
+				if(nleft > 0) {
+					printf("Read: error, 文件写入时不按顺序\n");
+					return ngot;
+				}
+				continue;
+			}
+			void *src_buffer;
+			if(disk_read((unsigned short)FBLK_BASE + inode->dir_pointer[i],src_buffer) != 0) {
+				printf("Read: error, disk_read error\n");
+				return ngot;
+			}
+			
+			if(nleft < (BLOCK_SIZE-blk_start_index)) {
+				memcpy(buffer+ngot,(char*)src_buffer+blk_start_index,nleft);
+				ngot += nleft;
+				nleft -= nleft;
+				blk_start_index = 0;	
+			}
+			else {
+				memcpy(buffer+ngot,(char*)src_buffer+blk_start_index,BLOCK_SIZE-blk_start_index);
+				blk_start_index = 0;
+				ngot += (BLOCK_SIZE-blk_start_index);
+				nleft -= (BLOCK_SIZE-blk_start_index);
+			}
+		}
+	}
+	//indirect pointer
+	else if(offset < (DIRP_MAX_SIZE+INDP_MAX_SIZE)) {
+		//下面这三个高危错误区,不太确定对不对
+		int ptr0_start_index = (offset - DIRP_MAX_SIZE) / (INDP_MAX_SIZE / 2);
+		int ptr1_start_index = (offset - DIRP_MAX_SIZE - (ptr0_start_index * (INDP_MAX_SIZE / 2))) / BLOCK_SIZE; 
+		int blk_start_index = (offset - DIRP_MAX_SIZE - (ptr0_start_index * (INDP_MAX_SIZE / 2)) - (ptr1_start_index * BLOCK_SIZE));
+		for(int i = ptr0_start_index;i < 2 && nleft > 0;i++) {
+			if(inode->ind_pointer[i] ==  ((unsigned short)(-1))) {
+				if(nleft > 0) {
+					printf("Read: error, 文件写入时不按顺序\n");
+					return ngot;
+				}
+				continue;
+			}
+			void *ptr_buffer;
+			if(disk_read((unsigned short)FBLK_BASE + inode->ind_pointer[i],ptr_buffer) != 0){
+				printf("Read: error, disk_read error\n");
+				return ngot;
+			}
+			unsigned short* ptr_to_data = (unsigned short*) ptr_buffer;
+			ptr_to_data += ptr1_start_index;
+			//写入时已经确保了一级指针块中,指针是连续的
+			for(int j = ptr1_start_index;j < PTR_MAX_PBLK && nleft > 0;j++,ptr_to_data++) {
+				if( *ptr_to_data == ((unsigned short)-1)) {
+					if(nleft > 0) {
+						printf("Read: error, 文件写入时不按顺序\n");
+						return ngot;
+					}
+					break;
+				}
+				void *src_buffer;
+				if(disk_read((unsigned short)FBLK_BASE+*ptr_to_data,src_buffer) != 0) {
+					printf("Read: error, disk_read error\n");
+					return ngot;
+				}
+				if(nleft < (BLOCK_SIZE-blk_start_index)) {
+					memcpy(buffer+ngot,(char*)src_buffer+blk_start_index,nleft);
+					blk_start_index = 0;
+					ngot += nleft;
+					nleft -= nleft;
+				}
+				else {
+					memcpy(buffer+ngot,(char*)src_buffer+blk_start_index,BLOCK_SIZE-blk_start_index);
+					blk_start_index = 0;
+					ngot += (BLOCK_SIZE - blk_start_index);
+					nleft -= (BLOCK_SIZE - blk_start_index);
+				}			
+			}
+			ptr1_start_index = 0;
+		}
+	}
+	else if(offset < (DIRP_MAX_SIZE+INDP_MAX_SIZE+DINDP_MAX_SIZE)) {
+		//ptr0_start_index = 0; doub_ind_pointer only one
+		int ptr1_start_index = (offset - DIRP_MAX_SIZE - INDP_MAX_SIZE) / (INDP_MAX_SIZE / 2);
+		int ptr2_start_index = (offset - DIRP_MAX_SIZE - INDP_MAX_SIZE - (ptr1_start_index * (INDP_MAX_SIZE / 2))) / BLOCK_SIZE;
+		int blk_start_index = (offset - DIRP_MAX_SIZE - INDP_MAX_SIZE - (ptr1_start_index * (INDP_MAX_SIZE / 2)) - (ptr2_start_index * BLOCK_SIZE));
+		unsigned short* ptr1_buffer;
+		if(disk_read((unsigned short)FBLK_BASE+inode->doub_ind_pointer,ptr1_buffer) != 0) {
+			printf("Read: error, disk_read error\n");
+			return ngot;
+		}
+		ptr1_buffer += ptr1_start_index;
+		for(int i = ptr1_start_index;i < PTR_MAX_PBLK;i++,ptr1_buffer++) {
+			if(*ptr1_buffer == ((unsigned short) -1)) {
+				if(nleft > 0) {
+					printf("Read: error, 文件写入时不按顺序\n");
+					return ngot;
+				}
+				break;
+			}
+
+			unsigned short* ptr2_buffer; // ptr_to_data
+			if(disk_read((unsigned short)FBLK_BASE+*ptr1_buffer,ptr2_buffer) != 0) {
+				printf("Read: error, disk_read error\n");
+				return ngot;
+			}
+			ptr2_buffer += ptr2_start_index;
+			for(int j = ptr2_start_index; j < PTR_MAX_PBLK && nleft > 0;j++,ptr2_buffer++) {
+				if( *ptr2_buffer == ((unsigned short)-1)) {
+					if(nleft > 0) {
+						printf("Read: error, 文件写入时不按顺序\n");
+						return ngot;
+					}
+					break;
+				}
+				void* src_buffer;
+				if(disk_read((unsigned short)FBLK_BASE+*ptr2_buffer,src_buffer) != 0) {
+					printf("Read: error, disk_read error\n");
+					return ngot;
+				}
+				if(nleft < (BLOCK_SIZE-blk_start_index)) {
+					memcpy(buffer+ngot,(char*)src_buffer+blk_start_index,nleft);
+					blk_start_index = 0;
+					ngot += nleft;
+					nleft -= nleft;
+				}
+				else {
+					memcpy(buffer+ngot,(char*)src_buffer+blk_start_index,BLOCK_SIZE-blk_start_index);
+					blk_start_index = 0;
+					ngot += (BLOCK_SIZE - blk_start_index);
+					nleft -= (BLOCK_SIZE - blk_start_index);
+				}
+			}
+			ptr2_start_index = 0;
+		}
+		ptr1_start_index = 0;
+	}
+
 	printf("Read is called:%s\n",path);
-	return 0;
-}
-
-int fs_mknod (const char *path, mode_t mode, dev_t dev)
-{
-	printf("Mknod is called:%s\n",path);
-	return 0;
-}
-
-int fs_mkdir (const char *path, mode_t mode)
-{
-	printf("Mkdir is called:%s\n",path);
-	return 0;
-}
-
-int fs_rmdir (const char *path)
-{
-	printf("Rmdir is called:%s\n",path);
-	return 0;
-}
-
-int fs_unlink (const char *path)
-{
-	printf("Unlink is callded:%s\n",path);
-	return 0;
-}
-
-int fs_rename (const char *oldpath, const char *newname)
-{
-	printf("Rename is called:%s\n",oldpath);
-	return 0;
+	return ngot;
 }
 
 int fs_write (const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *fi)
@@ -726,44 +1009,6 @@ int fs_write (const char *path, const char *buffer, size_t size, off_t offset, s
 int fs_truncate (const char *path, off_t size)
 {
 	printf("Truncate is called:%s\n",path);
-	return 0;
-}
-
-int fs_utime (const char *path, struct utimbuf *buffer)
-{
-	printf("Utime is called:%s\n",path);
-	return 0;
-}
-
-int fs_statfs (const char *path, struct statvfs *stat)
-{
-	printf("Statfs is called:%s\n",path);
-	return 0;
-}
-
-int fs_open (const char *path, struct fuse_file_info *fi)
-{
-
-	printf("Open is called:%s\n",path);
-	return 0;
-}
-
-//Functions you don't actually need to modify
-int fs_release (const char *path, struct fuse_file_info *fi)
-{
-	printf("Release is called:%s\n",path);
-	return 0;
-}
-
-int fs_opendir (const char *path, struct fuse_file_info *fi)
-{
-	printf("Opendir is called:%s\n",path);
-	return 0;
-}
-
-int fs_releasedir (const char * path, struct fuse_file_info *fi)
-{
-	printf("Releasedir is called:%s\n",path);
 	return 0;
 }
 
