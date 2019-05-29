@@ -1110,6 +1110,7 @@ int fs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t off
 }
 
 
+//WWWWWWWWWWWWWWWWWWWWWWWWW:尚未通过大文件测试(indirect 和 double indirect)
 int fs_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi)
 {
 	//size means the req uired size
@@ -1438,6 +1439,64 @@ int fs_truncate (const char *path, off_t size){
 	return 0;
 }
 
+/* 综合mknod和mkdir的函数
+ * path: 文件路径; 
+ * is_dir: 是目录则为1, 是普通文件则为0
+ */
+int mkfile (const char *path,int is_dir) {
+	//先判断inode_block和free_block还是否有剩余 (虽然free_block不会用)
+		//可以调用ljt已经写好的接口
+		//没有剩余的话返回-ENOSPC
+
+	//先解析路径,将path分为父目录和文件(夹)
+		//其中path的结尾带不带'/'得分类讨论
+		//结尾带'/'且是is_dir
+		//结尾不带'/'的,直接分类处理
+	
+
+	//解析完路径,获取父目录的inode
+
+	//获取父目录的inode
+		//修改mtime和ctime
+		//在父目录的DirPair块中,添加一项
+		//这个函数还是和写入时一样,封装一下
+		//判断父目录的块是否需要新分配块,封装一下
+		//如果新分配块失败,也返回-ENOSPC
+
+	//获取空闲的inode,初始化时不分配块
+		//修改相应的inode_bmap
+		//填充inode的相关内容
+
+}
+
+/* 将数据写入块中的封装,凡是写入块的操作都可以调用这个
+ * 使用方法: 先将inode中可用已分配好的指针存进数组blk_ptr里,
+ * 在此函数外已经确保blk_ptr可存下size的数据!!!!!!,内部直接分配
+ * 接口:
+ * blk_ptr: 指针数组的首地址, 记录了要写入的块的指针, 按顺序写入其中
+ * len: blk_ptr 数组的大小
+ * buffer: 写入的内容
+ * size: 需要写入的大小
+ * offset: 在blk_ptr[0]的第几个byte开始写入
+ * 返回值:
+ * 
+ */
+int write_to_blk(unsigned short* blk_ptr,size_t len,void* buffer,size_t size,off_t offset) {
+
+}
+
+/* 配合写入块时的辅助函数, 判断是否需要分配新的块,如果需要则分配
+ * 注意! 新块全初始化为-1, 为方便文件夹使用(也可判断)
+ * 接口:
+ * inode: 即文件的inode
+ * size: 需要新增的size
+ * 返回值:
+ * 分配失败,无多余空间: 
+ */
+int alloc_blk(struct Inode* inode,size_t size) {
+
+}
+
 int fs_mknod (const char *path, mode_t mode, dev_t dev)
 {
 	(void) mode;
@@ -1446,6 +1505,7 @@ int fs_mknod (const char *path, mode_t mode, dev_t dev)
 	printf("Mknod is called:%s\n",path);
 	return 0;
 }
+.
 
 int fs_mkdir (const char *path, mode_t mode)
 {
