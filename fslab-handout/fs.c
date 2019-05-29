@@ -89,10 +89,14 @@ struct DirPair{
 
 
 
-/******* helper function begin *******/
+/************** helper function begin **************/
 
-
-/* get inode num and inode struct from path
+/************** get_inode相关的函数 **************/
+/* get_inode 
+ * 通过文件路径,获取对应的Inode结构
+ * 接口:
+ * path: 文件从根目录开始的路径名
+ * target: 待修改的inode值, 传入&inode, 修改*target
  * return value:
  * (-1) - disk read error
  * (-2) - filename or path not exist
@@ -154,8 +158,16 @@ int get_inode(const char* path,struct Inode **target) {
 	return file_num;
 }
 
-// get file inode number(short) in a dir by filename and dir num
-// return -1 if something is wrong, return -2 if not found , else file inode offset，
+/* get_inode_idir - get file's inode_num in the directory
+ * 在目录中通过文件名获取inode_num
+ * 接口:
+ * filename: 文件名(不包含路径,不是路径名),(可以是目录)
+ * dir_num: 查询目录的inode_num(编号)
+ * 返回值:
+ * 读取block出错,返回-1
+ * 文件未找到,返回-2
+ * 其余情况,返回该文件对应的inode_num(编号)
+ */
 int get_inode_idir(const char* filename, int dir_num){
     struct Inode *dir_inode;
     // get dir inode (struct)
@@ -267,8 +279,15 @@ int get_inode_idir(const char* filename, int dir_num){
     return -2;    
 }
 
-// get inode(struct) by inode number (in bitmap)
-// return -1 if something is wrong, else 0
+/* get_inode_iblk - get Inode(struct) by inode_num in the inode_blk
+ * 通过inode_num 得到相应的inode结构体数据 (在inode_blk中存储的)
+ * 接口:
+ * inode_num: inode的编号
+ * inode: 实际上是指针传参, 传进来&inode, 返回的结构即对指向该inode的指针(解引用)的值做的修改
+ * 返回值:
+ * 出错,读取块出错,返回-1
+ * 其他情况,返回0
+ */
 int get_inode_iblk(int inode_num, struct Inode** inode ){
     // calculate block id and offset within a block where inode locates
     int blk_id = INODE_BASE + inode_num/INODE_NUM_PBLK;
@@ -287,7 +306,9 @@ int get_inode_iblk(int inode_num, struct Inode** inode ){
     else
         return -1;
 }
-/* bitmap_opt - revise bitmap block
+
+/************** 对bitmap操作的函数 **************/
+/* bitmap_opt - revise bitmap_block
  * bmap_num - block number of bitmap
  * mode - 0 for freeing, 1 for allocating
  * num - inode num of data block num
@@ -330,7 +351,80 @@ int bitmap_opt(int mode, int num, int bmap_num){
 	return 0;
 }
 
-/* get_fblk_num - get free blocks number
+/* imap_opt - revise inode bitmap block 
+ * 修改inode_bitmap中inode_num对应的bit
+ * mode - 0 for freeing, 1 for allocating
+ * num - inode num of data block num
+ * error return -1 or -2, else 0
+ */
+int imap_opt(int mode, int inode_num){
+	// read in inode bitmap block
+	char buf[BLOCK_SIZE + 1] = "";
+	if (disk_read(INODE_BMAP_BASE, buf)){
+		return -1;
+	}
+
+	int byte_id = inode_num / 8;
+	int bit_id  = inode_num % 8;
+	int opt = mode & 0x1;
+	char bmap_stat = (buf[byte_id] >> bit_id) & 0x1;
+	char byte_stat = (char)opt;
+
+	// this means trying to free a free inode 
+	// or allocate a allocated inode
+	if ((byte_stat^bmap_stat) == 0){
+		if (byte_stat == '\1'){// wrong on allocate a allocated inode
+			return -1;
+		}
+		else{
+			return -2;
+		}
+		////////free a free inode is not ok 也当错误情况处理吧，返回-2之类的//ok
+	}
+	// old_stat opt -> new_stat ; the better to change the opt
+	// 0 1 -> 1 ; 1 0 -> 0; 
+	// 0^(1|1) -> 1 ; 1^(1|0) -> 0; thus 无论free还是alloc都^1,free掉free和alloc给alloced都当错误处理
+	// change bit map
+	byte_stat = (buf[byte_id]) ^ ((0x1) << bit_id);/////
+	buf[byte_id] = byte_stat;
+	// write inode bitmap block
+	if (disk_write(INODE_BMAP_BASE, buf)){
+		return -1;
+	}
+	return 0;
+}
+
+
+/* bmap_cnt - count free bit numbers in bitmap
+ * 数bitmap中未分配块的个数, 即数'0'(二进制bit)
+ * return free numbers if nothing wrong, else -1
+ */
+int bmap_cnt(int bmap_blk_num){
+	char buf[BLOCK_SIZE + 1];
+	// read in bmap block
+	if (disk_read(bmap_blk_num, buf)){
+		printf("error: disk read\n");
+		return -1;
+	}
+	int counter = 0;
+	char mask = 0x11;
+	int helpCnt = 0;
+	// for each byte, count its bit and sum up
+	for (int i = 0; i < BLOCK_SIZE; i++){
+		helpCnt = (int)(buf[i] & mask);
+		helpCnt += (int)((buf[i]>>1) & mask);
+		helpCnt += (int)((buf[i]>>2) & mask);
+		helpCnt += (int)((buf[i]>>3) & mask);
+		helpCnt = (helpCnt + (helpCnt >> 4)) & 0xF;
+		counter += (int)helpCnt;
+	}
+	return ((int) BLOCK_SIZE) * 8 - counter;
+}
+
+/************** 分配块相关的操作 **************/
+//WWWWWWWWWWWWWWWWWWWWWWWWWWWWW 该名称有误导性,建议修改为 get_fblk_sum or get_fblk_cnt
+/* get_fblk_num - get free blocks count 
+ * 注意是返回当前剩余的free block数
  * return free blocks number if no errors exist, else return -1
  */
 int get_fblk_num(){
@@ -418,14 +512,15 @@ int find_fblk(int num, int *fblk_list){
 	return fblk_num;
 
 }
+
 /* inode_ptr_opt - free or allocate block pointer in the inode
  * mode: 1 for allocating ptr, 0 for freeing ptr
  * ptr_list: ptr needed to be removed or added from inode
  * return -1 if errors exist, else 0
  */
-
+//WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW:int*ptr_list, 虽然暂时没问题,但在将ptr的block用memcpy拷贝进这个ptr_list的时候会有问题,建议修改为short*
 int inode_ptr_opt(int mode, int inode_num, int ptr_num, int *ptr_list){
-	(void)mode;
+	(void)mode; //WWWWWWWWWWWWWWWWWWWWWWWWW, 没用到? 为啥还传进来
 	struct Inode* inode;
 	if (get_inode_iblk(inode_num, &inode)){
 		printf("error: get inode %d\n", inode_num);
@@ -597,76 +692,8 @@ int inode_ptr_opt(int mode, int inode_num, int ptr_num, int *ptr_list){
 
 
 
-/* imap_opt - revise inode bitmap block
- * mode - 0 for freeing, 1 for allocating
- * num - inode num of data block num
- * error return -1, else 0
- */
-int imap_opt(int mode, int inode_num){
-	// read in inode bitmap block
-	char buf[BLOCK_SIZE + 1] = "";
-	if (disk_read(INODE_BMAP_BASE, buf)){
-		return -1;
-	}
 
-	int byte_id = inode_num / 8;
-	int bit_id  = inode_num % 8;
-	int opt = mode & 0x1;
-	char bmap_stat = (buf[byte_id] >> bit_id) & 0x1;
-	char byte_stat = (char)opt;
-
-	// this means trying to free a free inode 
-	// or allocate a allocated inode
-	if ((byte_stat^bmap_stat) == 0){
-		if (byte_stat == '\1'){// wrong on allocate a allocated inode
-			return -1;
-		}
-		else{
-			return -2;
-		}
-		////////free a free inode is not ok 也当错误情况处理吧，返回-2之类的//ok
-	}
-	// old_stat opt -> new_stat ; the better to change the opt
-	// 0 1 -> 1 ; 1 0 -> 0; 
-	// 0^(1|1) -> 1 ; 1^(1|0) -> 0; thus 无论free还是alloc都^1,free掉free和alloc给alloced都当错误处理
-	// change bit map
-	byte_stat = (buf[byte_id]) ^ ((0x1) << bit_id);/////
-	buf[byte_id] = byte_stat;
-	// write inode bitmap block
-	if (disk_write(INODE_BMAP_BASE, buf)){
-		return -1;
-	}
-	return 0;
-}
-
-
-/* bmap_cnt - count free bit numbers in bitmap
- * return free numbers if nothing wrong, else -1
- */
-int bmap_cnt(int bmap_blk_num){
-	char buf[BLOCK_SIZE + 1];
-	// read in bmap block
-	if (disk_read(bmap_blk_num, buf)){
-		printf("error: disk read\n");
-		return -1;
-	}
-	int counter = 0;
-	char mask = 0x11;
-	int helpCnt = 0;
-	// for each byte, count its bit and sum up
-	for (int i = 0; i < BLOCK_SIZE; i++){
-		helpCnt = (int)(buf[i] & mask);
-		helpCnt += (int)((buf[i]>>1) & mask);
-		helpCnt += (int)((buf[i]>>2) & mask);
-		helpCnt += (int)((buf[i]>>3) & mask);
-		helpCnt = (helpCnt + (helpCnt >> 4)) & 0xF;
-		counter += (int)helpCnt;
-	}
-	return ((int) BLOCK_SIZE) * 8 - counter;
-}
-
-
-/******* helper function end *******/
+/************** helper function end **************/
 
 
 
@@ -811,6 +838,8 @@ int mkfs(){
 	return 0;
 } 
 
+//Filesystem operations that you need to implement
+
 int fs_statfs (const char *path, struct statvfs *stat){
 	(void) path;//没有意义的参数
 	
@@ -833,7 +862,6 @@ int fs_statfs (const char *path, struct statvfs *stat){
 	return 0;
 }
 
-//Filesystem operations that you need to implement
 int fs_getattr (const char *path, struct stat *attr)
 {
     if(NULL == path) {
@@ -938,7 +966,6 @@ int fs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t off
 	else{
 		dir_path[path_len] = '\0';
 	}
-
 
 	// 更新目录文件atime/////////////////
 	dir_inode->atime = time(NULL);
@@ -1108,7 +1135,6 @@ int fs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t off
 	printf("Readdir is called:%s\n", path);
 	return 0;
 }
-
 
 //WWWWWWWWWWWWWWWWWWWWWWWWW:尚未通过大文件测试(indirect 和 double indirect)
 int fs_read(const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi)
@@ -1506,7 +1532,6 @@ int fs_mknod (const char *path, mode_t mode, dev_t dev)
 	return 0;
 }
 .
-
 int fs_mkdir (const char *path, mode_t mode)
 {
 	(void) mode;
@@ -1598,7 +1623,6 @@ int main(int argc, char *argv[])
 		}
     return fuse_main(argc, argv, &fs_operations, NULL);
 }
-
 
 /******************* DUMP *******************/
 /******************* DUMP *******************/
