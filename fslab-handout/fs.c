@@ -336,7 +336,9 @@ int bitmap_opt(int mode, int num, int bmap_num){
 int get_fblk_num(){
 	int num1 = bmap_cnt(FBLK_BMAP_BASE);
 	int num2 = bmap_cnt(FBLK_BMAP_BASE + 1);
-	return (num1|num2)==-1? -1 : num1+num2;
+	return (-1 == num1) || (-1 == num2) ? -1 : num1+num2;
+	// return (num1|num2)== -1 ? -1 : num1+num2; //EEEEEEEEEEEEEEEEEEEEEEEEEE: 这个未必是-1 == num1 || -1 == num2的意思,比如4bit,1010,0101,也会有错误.
+	//EEEEEEEEEEEEEEEEEEEEEEEEE: 修改意见, (int)(num1|num2) < 0,这样应该可以. 或者语义清晰点 (-1 == num1) || (-1 == num2)
 }
 
 /* find_fblk - find free blocks using first fit algorithm
@@ -830,8 +832,6 @@ int fs_statfs (const char *path, struct statvfs *stat){
 	printf("Statfs is called:%s\n",path);
 	return 0;
 }
-
-
 
 //Filesystem operations that you need to implement
 int fs_getattr (const char *path, struct stat *attr)
@@ -1440,12 +1440,17 @@ int fs_truncate (const char *path, off_t size){
 
 int fs_mknod (const char *path, mode_t mode, dev_t dev)
 {
+	(void) mode;
+	(void) dev;
+	
 	printf("Mknod is called:%s\n",path);
 	return 0;
 }
 
 int fs_mkdir (const char *path, mode_t mode)
 {
+	(void) mode;
+
 	printf("Mkdir is called:%s\n",path);
 	return 0;
 }
