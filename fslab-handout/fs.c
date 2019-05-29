@@ -1030,7 +1030,7 @@ int fs_read(const char *path, char *buffer, size_t size, off_t offset, struct fu
 		}
 		ptr1_start_index = 0;
 	}
-
+	
 	printf("Read is called:%s\n",path);
 	return ngot;
 }
