@@ -92,7 +92,7 @@ struct DirPair{
 /******* helper function begin *******/
 
 
-/* get inode num and inode struct from path
+/* get inode num from path
  * return value:
  * (-1) - disk read error
  * (-2) - filename or path not exist
@@ -330,96 +330,6 @@ int bitmap_opt(int mode, int num, int bmap_num){
 	return 0;
 }
 
-/* get_fblk_num - get free blocks number
- * return free blocks number if no errors exist, else return -1
- */
-int get_fblk_num(){
-	int num1 = bmap_cnt(FBLK_BMAP_BASE);
-	int num2 = bmap_cnt(FBLK_BMAP_BASE + 1);
-	return (num1|num2)==-1? -1 : num1+num2;
-}
-
-
-/* find_fblk - find free blocks using first algorithm
- * num: needed free blocks number
- * fblk_list: store free block numbers
- * return (free blocks num - num) if no errors exist
- * return -1 if free blocks num less than num
- * return -3 if num == 0 or fblk_list == NULL
- * else return -2 
- */
-int find_fblk(int num, int *fblk_list){
-	// 申请0个或fblk_list为空指针，返回-3
-	if ((0 == num) || (NULL = fblk_list)){
-		return -3;
-	}
-
-	// 统计空闲块数量
-	int fblk_num = get_fblk_num();
-	if (fblk_num == -1){
-		// 统计bmap失败的情况
-		printf("error: get freeblock num fail\n");
-		return -2;
-	}
-	//note:或者<=？我们的文件系统会被占满，还是要求预留一些空间？
-	else if(fblk_num < num){ 
-		// free blocks不足的情况
-		printf("no enough blocks: fblk %d - ask for %d\n", fblk_num, num);
-		return -1;
-	}
-	else{
-		fblk_num -= num;
-	}
-
-	char buf[BLOCK_SIZE + 1];
-	// 读取第一个freeblockk bitmap
-	if (disk_read(FBLK_BMAP_BASE, buf)){
-		printf("error: disk read %d\n", FBLK_BMAP_BASE);
-		return -2;
-	}
-	// 按位检查
-	int blk_id = 0;
-	for (int i = 0; i < BLOCK_SIZE; i++){
-		for (int j = 0; j < 8; j++){
-			// 未被占用则赋值给fblk_list
-			if (0 == ((buf[i]>>j) & 0x1)){
-				num--;
-				(*fblk_list++) = blk_id; 
-			}
-			blk_id++;
-			// 分配完成则返回
-			if (num == 0){
-				return fblk_num;
-			}
-		}
-	}
-	// 读取第二个freeblockk bitmap
-	if (disk_read(FBLK_BMAP_BASE+1, buf)){
-		printf("error: disk read %d\n", FBLK_BMAP_BASE);
-		return -2;
-	}
-	// 按位检查
-	for (int i = 0; i < BLOCK_SIZE; i++){
-		for (int j = 0; j < 8; j++){
-			// 未被占用则赋值给fblk_list
-			if (0 == ((buf[i]>>j) & 0x1)){
-				num--;
-				(*fblk_list++) = blk_id; 
-			}
-			blk_id++;
-			// 分配完成则返回
-			if (num == 0){
-				return fblk_num;
-			}
-		}
-	}
-	
-	return fblk_num;
-
-}
-
-
-
 /* imap_opt - revise inode bitmap block
  * mode - 0 for freeing, 1 for allocating
  * num - inode num of data block num
@@ -649,7 +559,7 @@ int fs_statfs (const char *path, struct statvfs *stat){
 	stat->f_bavail = stat->f_bfree;
 	stat->f_files = (__fsfilcnt_t)(FILE_MAX_NUM);
 	stat->f_ffree = (__fsblkcnt_t)(bmap_cnt(INODE_BMAP_BASE));
-	stat->f_favail = stat->f_ffree;
+	stat->f_favail = stat->f_bfree;
 	stat->f_namemax = (unsigned long)NAME_MAX_LEN;
 
 	printf("Statfs is called:%s\n",path);
@@ -1125,115 +1035,14 @@ int fs_read(const char *path, char *buffer, size_t size, off_t offset, struct fu
 	return ngot;
 }
 
-int fs_write (const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *fi){
-	#ifdef DEBUG
-	printf("write: is calling\n");
-	#endif
-
-
-
+int fs_write (const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *fi)
+{
 	printf("Write is called:%s\n",path);
 	return 0;
 }
 
-
-/* fs_truncate - revise size information of regular file
- * return 0 if no error exists, else -1
- */
-int fs_truncate (const char *path, off_t size){
-	#ifdef DEBUG
-	printf("truncate: is calling\n");
-	#endif
-	// 检查路径和大小
-	if (NULL == path || size < 0 || size > FILE_MAX_SIZE){
-		printf("error: path or size %ld \n", size);
-		return -1;
-	}
-	// 获取文件Inode
-	struct Inode *inode;
-	int inode_num = get_inode(path, &inode); 
-	switch (inode_num){
-		case -1:
-			printf("error: disk read\n");
-			return -1;
-			break;
-		case -2:
-			printf("error: path (%s)\n", path);
-			return -1;
-			break;
-		case -3:
-			printf("error: path (%s)\n", path);
-			return -1;
-			break;
-		default:
-			break;
-	}
-	//note: 可能存在的问题，创建新文件时，
-	//		先写入Inode再执行truncate还是？
-	//		如果不能保证顺序，可能无法得到inode
-
-	// 文件存储空间变化的大小
-	__off_t request_size = size - inode->size;
-	if (request_size > 0){	//请求扩大文件
-		// 需要的空闲块数量
-		int fblk_request_num = (int)(request_size/((__off_t)BLOCK_SIZE));
-		// 检查空闲块个数是否充足
-		int fblk_num = get_fblk_num();
-		if (fblk_num == -1){
-			return -1;
-		}
-		else if(fblk_num < fblk_request_num){//note: free blocks total size等于size被允许吗？
-			return -ENOSPC;
-		}
-
-		//批量请求空闲块的num(16为一块)
-		//或改为逐个逐个请求
-		int fblk_list[16];//note: list的大小应该为多大？
-		//请求得到空闲块的num，更新inode的指针
-		for (int i = 0; i < fblk_request_num/16; i++){
-			if (get_fblk_num(16, fblk_list) == -1){
-				printf("error: get free blocks num\n");
-				return -1;
-			}
-			fblk_request_num -= 16;
-
-			// todo： 更新指针（封装个函数？）
-			// 更新指针，inode和datablock bitmap
-			// int update_inode_ptr(int mode, int num, int *ptr_list)
-
-		}
-		// 请求剩余的空闲块，更新指针
-		fblk_request_num -= (fblk_request_num/16)*16;
-		if (get_fblk_num(fblk_request_num, fblk_list) == -1){
-			printf("error: get free blocks num\n");
-			return -1;
-		}
-		// todo: 更新指针（封装函数）
-
-	}
-	else if (request_size < 0){ //请求缩小文件
-		// 检查指针数量
-		// 先释放doub_ind_ptr，再释放ind_ptr，最后释放dir_ptr
-		// 即相当于更新指针
-		// 封装一个更新指针的函数很有必要
-		// int update_inode_ptr(int mode, int num, int *ptr_list)
-		
-		// 得到释放的块数
-		request_size = -request_size;
-		int release_blk_num = (int)((request_size + (__off_t)BLOCK_SIZE - 1) / (__off_t)(BLOCK_SIZE));
-		// 释放相应数量的块及指针
-		// update_inode_ptr(0, release_blk_num, NULL);
-
-	}
-	//还有一种情况为没有改变大小
-
-	//更新ctime
-	inode->ctime = time(NULL);
-	if (disk_write(inode_num/INODE_NUM_PBLK + INODE_BMAP_BASE, inode - inode_num%INODE_NUM_PBLK)){
-		printf("error: disk write\n");
-		return -1;
-	}
-
+int fs_truncate (const char *path, off_t size)
+{
 	printf("Truncate is called:%s\n",path);
 	return 0;
 }
