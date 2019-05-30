@@ -519,6 +519,7 @@ int find_fblk(int num, int *fblk_list){
  * return -1 if errors exist, else 0
  */
 //WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW:int*ptr_list, 虽然暂时没问题,但在将ptr的block用memcpy拷贝进这个ptr_list的时候会有问题,建议修改为short*
+//WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW:尚未review完, 问ptr_list中的需要已经处理完bmap了吗?,在何处处理?,问pointer_bmap处理了吗?
 int inode_ptr_opt(int mode, int inode_num, int ptr_num, int *ptr_list){
 	(void)mode; //WWWWWWWWWWWWWWWWWWWWWWWWW, 没用到? 为啥还传进来
 	struct Inode* inode;
@@ -535,7 +536,6 @@ int inode_ptr_opt(int mode, int inode_num, int ptr_num, int *ptr_list){
     int ind_ptr_num = (dir_inode->pointer_bmap & 0x30) >> 4;
     int dual_ind_ptr_num = (dir_inode->pointer_bmap & 0x40) >> 6;
 	
-
 	// 定义一个操作符
 	// free 000000
 	// allocate 111111
@@ -544,13 +544,15 @@ int inode_ptr_opt(int mode, int inode_num, int ptr_num, int *ptr_list){
 	// allocated or free blocks ptr
 	// allocated blocks
 	unsigned short *blk_ptr = inode->dir_pointer; //direct ptr
-	for (int i = 0; i < dir_ptr_num && 0!=ptr_num; i++, blk_ptr++{
+	for (int i = 0; i < dir_ptr_num && 0 != ptr_num; i++, blk_ptr++) {
 		if (*blk_ptr != (unsigned short)(-1)){
-			i--;
+			i--; //EEEEEEEEEEEEEEEEEEEEEEEEEE: 注意上面是i++,blk_ptr++, 此处blk_ptr未--, 建议改成成功后在循环末尾++这俩
 			continue;
 		}
-		*blk_ptr = (unsigned short)(*ptr_list++);//赋值给这个空的指针
+		*blk_ptr = (unsigned short)(*ptr_list++);//赋值给这个空的指针 //WWWWWWWWWWWWWWWWWW: 这种有风险的*p++,建议还是加上括号
 		ptr_num--;
+		//EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE: 下面这个disk_write, 我晕了, 应该是错的把?????, 是按block写入,没有offset一说的.
+		//WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW: 我就看到这里
 		if (disk_write((int)INODE_BASE + inode_num/(int)INODE_NUM_PBLK, inode - inode_num%(int)INODE_NUM_PBLK)){//更新Inode
 			printf("error: disk write, blk:%d\n", (int)INODE_BASE + inode_num/(int)INODE_NUM_PBLK);
 			return -1;
@@ -679,10 +681,7 @@ int inode_ptr_opt(int mode, int inode_num, int ptr_num, int *ptr_list){
 					}
 				}
 			}
-		}
-
-
-		
+		}		
 	}
 
 	return 0;
@@ -1512,14 +1511,69 @@ int write_to_blk(unsigned short* blk_ptr,size_t len,void* buffer,size_t size,off
 }
 
 /* 配合写入块时的辅助函数, 判断是否需要分配新的块,如果需要则分配
+ * 分配完块后, 相应的指针, 指针块都有修改
  * 注意! 新块全初始化为-1, 为方便文件夹使用(也可判断)
  * 接口:
  * inode: 即文件的inode
  * size: 需要新增的size
  * 返回值:
+ * 新分配的块的数目:
  * 分配失败,无多余空间: 
  */
-int alloc_blk(struct Inode* inode,size_t size) {
+int alloc_blk(struct Inode* inode,size_t append_size) {
+	int cur_size = inode->size;
+	int cur_blk = allocated_blk_cnt(inode); // 当前块数目
+	int capacity = cur_blk * BLOCK_SIZE; //当前总容量
+	int cur_fspc = capacity - cur_size; //current free space 
+
+	int cur_ptr_flag = 0; //现在分配到哪个指针了
+	if(cur_size < DIRP_MAX_SIZE) 
+		cur_ptr_flag = 0;
+	else if(cur_size < DIRP_MAX_SIZE + INDP_MAX_SIZE)
+		cur_ptr_flag = 1;
+	else 
+		cur_ptr_flag = 2;
+
+	if(append_size < cur_fspc) {
+		return 0;
+	}
+	else {
+		int needed_spc = append_size - cur_fspc; //needed space
+		int needed_fblk = needed_spc / BLOCK_SIZE + !!(needed_spc % BLOCK_SIZE);
+
+	}
+
+
+	//上面写的有点冗余, 现在开始逻辑先行
+	//先计算需要多少个free blk分配
+	
+	//然后直接find_fblk,找到相应的数目,(尚未review,注意处理bmap)
+	//然后再用inode_ptr_opt填进去
+}
+
+//WWWWWWWWWWWWWWWWWWWWWWWWWW: 下面这个函数可能对文件夹不适用!!!!!!
+//且未检查readir的正确性!!! 
+//由于分配策略的原因,目录的size不能指示其空位(需要再研究,通过first fit简单删除,由于删除时会有空位,可换成其他策略),
+//在目录相关读写中,应该按pointer_bmap来读完所有的块,而非按size来判断
+/* allocated_blk_cnt - allocated block count
+ * 通过inode->size来判断现在已分配了多少个blk
+ * 接口:
+ * inode: 待判断的inode
+ * 返回值:
+ * 已分配的blk数
+ */
+int allocated_blk_cnt(struct Inode* inode) {
+	return (inode->size / BLOCK_SIZE) + !!(inode->size % BLOCK_SIZE); 
+	//考虑换成下面那个,如果需要
+} 
+/* real_allocated_blk_cnt - real allocated block count
+ * 通过inode的指针以及指针块中指针的具体值(非-1的指针数),来计算已分配的blk数
+ * 接口:
+ * inode: 待判定的inode
+ * 返回值:
+ * 已分配的blk数
+ */
+int real_allocated_blk_cnt(struct Inode* inode) {
 
 }
 
