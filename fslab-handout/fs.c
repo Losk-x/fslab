@@ -1516,16 +1516,22 @@ int write_to_blk(unsigned short* blk_ptr,size_t len,void* buffer,size_t size,off
  * 接口:
  * inode: 即文件的inode
  * size: 需要新增的size
+ * blk_ptr: 存储appended_size的blk_ptr
+ * len: blk_ptr的长度
+ * offset: blk_ptr[0]指向的块中开始写入的位置
  * 返回值:
+ * 实际上后三个参数通过指针传参,即需要修改.
  * 新分配的块的数目:
  * 分配失败,无多余空间: 
  */
-int alloc_blk(struct Inode* inode,size_t append_size) {
+int alloc_blk(struct Inode* inode,size_t append_size,unsigned short* blk_ptr,size_t *len,off_t *offset) {
+	//先计算需要多少个free blk分配
 	int cur_size = inode->size;
 	int cur_blk = allocated_blk_cnt(inode); // 当前块数目
 	int capacity = cur_blk * BLOCK_SIZE; //当前总容量
-	int cur_fspc = capacity - cur_size; //current free space 
-
+	int cur_fspc = capacity - cur_size; //current free space
+	int needed_fspc = append_size - cur_fspc;
+	
 	int cur_ptr_flag = 0; //现在分配到哪个指针了
 	if(cur_size < DIRP_MAX_SIZE) 
 		cur_ptr_flag = 0;
@@ -1534,7 +1540,28 @@ int alloc_blk(struct Inode* inode,size_t append_size) {
 	else 
 		cur_ptr_flag = 2;
 
+	unsigned char ptr_bmap = inode->pointer_bmap;
+	unsigned int ptr_cnt0 = ptr_bmap & 0xf;
+	unsigned int ptr_cnt1 = (ptr_bmap >> 4) & 0x3;
+	unsigned int ptr_cnt2 = ptr_bmap >> 6;
+
 	if(append_size < cur_fspc) {
+		*len = 1;
+		*offset = BLOCK_SIZE - cur_fspc; //即最后一个未满的块 - 剩余空间.
+
+		switch (cur_ptr_flag) {
+			case 0:
+				blk_ptr[0] = inode->dir_pointer[ptr_cnt0-1];
+				break;
+			case 1:
+				
+				break;
+			case 2:
+				break;
+			default:
+				break;
+		}
+
 		return 0;
 	}
 	else {
@@ -1543,10 +1570,18 @@ int alloc_blk(struct Inode* inode,size_t append_size) {
 
 	}
 
-
 	//上面写的有点冗余, 现在开始逻辑先行
 	//先计算需要多少个free blk分配
 	
+
+	if(needed_fspc < 0) {
+		*len = 1;
+
+		return 0; //此时默认最尾部的blk_ptr能存下appended_size
+	}
+	else {
+
+	}
 	//然后直接find_fblk,找到相应的数目,(尚未review,注意处理bmap)
 	//然后再用inode_ptr_opt填进去
 }
