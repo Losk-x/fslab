@@ -931,9 +931,6 @@ int rm_file_in_parent_dir(char *child_file_path){
 		//这个函数还是和写入时一样,封装一下
 		//判断父目录的块是否需要新分配块,封装一下
 		//如果新分配块失败,也返回-ENOSPC
-	time_t cur_time = time(NULL);
-	parent_inode->mtime = cur_time;
-	parent_inode->ctime = parent_inode->mtime;
 
 	// 删去表项
 	// 下面是获得所有datablock 的ptr list
@@ -1060,6 +1057,9 @@ int rm_file_in_parent_dir(char *child_file_path){
 		dir_pair_ptr++;
 	}
 	// 更新inode
+	time_t cur_time = time(NULL);
+	parent_inode->mtime = cur_time;
+	parent_inode->ctime = parent_inode->mtime;
 	inode->size -= sizeof(struct Dir_pair);
 	int inode_blk_id = inode_num/(int)INODE_NUM_PBLK + (int)INODE_BASE;
 	int inode_blk_offset = inode_num %(int)INODE_NUM_PBLK;
@@ -1118,6 +1118,7 @@ int rmfile(char* path){
 		free_inode_blk_buffer(inode_num,&inode);
 		return -1;
 	}
+	free_inode_blk_buffer(inode_num,&inode);
 	return 0;
 }
 
@@ -1933,6 +1934,7 @@ int fs_write (const char *path, const char *buffer, size_t size, off_t offset, s
 		}
 	}
 	
+	// 进行原位更新
 	int start_blk_n = (int)(offset/(off_t)BLOCK_SIZE);
 	offset = offset%(off_t)BLOCK_SIZE;
 	if(write_to_blk(ptr_list+start_blk_n , ptr_n , fwrite_buf, fwrite_size, offset) < 0) {
@@ -1941,6 +1943,7 @@ int fs_write (const char *path, const char *buffer, size_t size, off_t offset, s
 		return 0;
 	}
 	
+	// 更新inode的time和size并写入inode blk
 	if (append_size > 0){
 		inode->ctime = time(NULL);
 		inode->mtime = inode->ctime;
@@ -1948,6 +1951,7 @@ int fs_write (const char *path, const char *buffer, size_t size, off_t offset, s
 	else{
 		inode->mtime = time(NULL);
 	}
+	inode->size = size;
 	if (disk_write(inode_num/(int)INODE_NUM_PBLK + (int)INODE_BASE, inode - inode_num%(int)INODE_NUM_PBLK)){
 		printf("error: disk write\n")
 		return -1;
@@ -2119,7 +2123,7 @@ int mkfile (const char *path,int is_dir) {
 	parent_inode->ctime = cur_time;
 	
 	unsigned short ptr_list[PTR_MAX_CNT];
-	memset(ptr_list,-1,sizeof(int))
+	memset(ptr_list,-1,sizeof(int)*PTR_MAX_CNT)
 	size_t len = 0;
 	off_t offset = 0;
 	struct DirPair tmp_dirpair;
@@ -2388,7 +2392,6 @@ int alloc_blk(int inode_num,size_t append_size,unsigned short* blk_ptr,size_t *l
 			free_inode_blk_buffer(inode_num,&inode);
 			return -1;
 		}
-
 		//然后再用inode_ptr_add填进去
 		if(inode_ptr_add(inode_num,needed_fblk,blk_ptr+blkptr_index) < 0) {
 			printf("Alloc blk: error, find_fblk\n");
@@ -2524,10 +2527,41 @@ int fs_rename (const char *oldpath, const char *newname)
 	new_parent_inode_num = get_inode(new_parent_path,new_parent_inode);
 	
 	//删除原目录下的DirPair
-		//靠unlink的辅助函数
+		rm_file_in_parent_dir(oldpath);
+
 	//添加到新目录下的DirPair
-		//需要更新time吗? 暂时不更新
-	
+		//WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW:需要更新time吗? 暂时不更新
+	struct DirPair newpair;
+	newpair.inode_num = inode_num;
+	strcpy(newpair.name,name);
+	size_t len = 0;
+	off_t offset = 0;
+	unsigned short ptr_list[PTR_MAX_CNT];
+	memset(ptr_list,-1,sizeof(int)*PTR_MAX_CNT);
+
+	if(alloc_blk(new_parent_inode_num,sizeof(DirPair),ptr_list,&len,&offset) < 0) {
+		printf("Rename: alloc block error\n");
+		free_inode_blk_buffer(inode_num,&inode);
+		free_inode_blk_buffer(old_parent_inode_num,&old_parent_inode);
+		free_inode_blk_buffer(new_parent_inode_num,&new_parent_inode);
+		return -ENOSPC;
+	}
+
+	if(write_to_blk(ptr_list,len,newpair,sizeof(DirPair),offset) < 0) {
+		printf("Rename: write to block error\n");
+		free_inode_blk_buffer(inode_num,&inode);
+		free_inode_blk_buffer(old_parent_inode_num,&old_parent_inode);
+		free_inode_blk_buffer(new_parent_inode_num,&new_parent_inode);
+		return -1;
+	}
+
+	new_parent_inode->size += sizeof(DirPair);
+	//抄ljt的
+	if (disk_write(new_parent_inode_num/(int)INODE_NUM_PBLK + (int)INODE_BASE, new_parent_inode - inode_num%(int)INODE_NUM_PBLK)){
+		printf("error: disk write\n")
+		return -1;
+	}
+
 	printf("Rename is called:%s\n",oldpath);
 	free_inode_blk_buffer(inode_num,&inode);
 	free_inode_blk_buffer(old_parent_inode_num,&old_parent_inode);
