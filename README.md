@@ -27,8 +27,8 @@ Inode的结构基本给出，但是大小需要控制
 inode_block 和 block_pointer可以用偏移地址来计算，在superblock中存放inode blocks和data blocks的起始地址（data block可以存分段地址），则Inode中的指针即相当于偏移量，这样可以减小Inode大小
 经过分析，如下inode structure，short可以用于表示块偏移，则大大减小了inode的字节大小
 
-
 ## Block Analysis
+
 ---
 > 希望ljt来做可视化的说明
 > 
@@ -180,7 +180,7 @@ mode(open):判断用户是否有权限读/
 
 
 ## 实现细节
---- 
+---
 ### int mkfs();
 #### 函数介绍
 Description:
