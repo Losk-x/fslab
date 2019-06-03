@@ -675,156 +675,107 @@ int inode_ptr_add(int inode_num, int ptr_num, unsigned short *ptr_list){
 
 	// __off_t file_size = inode->size;
 	int ablk_cnt = allocated_blk_cnt(inode);
+	int start_ptr_id = 0;
 	#ifdef DEBUG
 	printf("Inode_ptr_add: 111111111111111111111111111\n");
 	#endif
-	// 分层分配 0: dir, 1:ind, 2:doub
-	int empty_blk_ptr_flag = 0; // 1 - dir ptr,  2 - ind ptr,  4 - doub ind ptr
-	unsigned short *empty_blk_ptr[3] = {inode->dir_pointer, inode->ind_pointer, inode->doub_ind_pointer }; // 空指针的块指针: 0 -dir, 1 - ind ptr, 2 - doub ind ptr
-	int ptr_ipos[3] = {0}; //ptr inverse position // 还剩多少指针
 
-	// 计算空指针开始的块号
+	// 计算空指针开始的块号所处的inode指针号
 	if (ablk_cnt < 12){
-
-		empty_blk_ptr_flag = 1;
-		ptr_ipos[0] = 12 - ablk_cnt;
-		empty_blk_ptr[0] = inode->dir_pointer + ablk_cnt;
-		#ifdef DEBUG
-			printf("Inode_ptr_add: start at dir ptr %d empty ptr blk: %x\n", empty_blk_ptr[0]);
-		#endif
+		start_ptr_id = ablk_cnt;
 	}
 	else if(ablk_cnt >= 12 && ablk_cnt < 12 + 2 * (int)PTR_MAX_PBLK){
-		empty_blk_ptr_flag = 2;
-		int max_ind_ptr_id = (ablk_cnt - 12)/(int)PTR_MAX_PBLK;
-		ptr_ipos[1] = 2 - max_ind_ptr_id;
-		empty_blk_ptr[1] = inode->ind_pointer + max_ind_ptr_id;
-		#ifdef DEBUG
-			printf("Inode_ptr_add: start at dir ptr %d empty ptr blk: %x\n", empty_blk_ptr[1]);
-		#endif
+		start_ptr_id = 12 + (ablk_cnt - 12)/(int)PTR_MAX_PBLK;
 	}
 	else{
-		empty_blk_ptr_flag = 4;
-		ptr_ipos[2] = 1;
-		empty_blk_ptr[2] = &inode->doub_ind_pointer;
-		#ifdef DEBUG
-			printf("Inode_ptr_add: start at dir ptr %d empty ptr blk: %x\n", empty_blk_ptr[2]);
-		#endif
+		start_ptr_id = 15;
 	}
 
-	int inode_blk_id = (int)INODE_BASE + inode_num/(int)INODE_NUM_PBLK + INODE_BASE;
-	void *inode_blk_ptr = (void *)(inode - inode_num%(int)INODE_NUM_PBLK);
-	
-	#ifdef DEBUG
-	printf("Inode_ptr_add: 22222222222222222222222222\n");
-	#endif
-	char buf[BLOCK_SIZE + 1];
-	int ptr_blk_id[3] = {inode_blk_id, inode_blk_id, inode_blk_id};
-	void *ptr_blk_buf[3] = {inode, inode, inode};
-	while(ptr_num > 0){
-		// doub ind ptr层
-		if (empty_blk_ptr_flag & 4){
-			#ifdef DEBUG
-				printf("Inode_ptr_add: emptr blk doub\n");
-			#endif
-			if (*empty_blk_ptr[2] == (unsigned short)(-1)){ //doub ptr为空，则为其分配一个块
-				int ptr_blk;// 找到空的块
-				if (find_fblk(1, &ptr_blk) < 0){
-					printf("error: no free blocks\n");
-					free_inode_blk_buffer(inode_num,&inode);
+	int inode_blk_id = (int)INODE_BASE + inode_num/(int)INODE_NUM_PBLK;
+	if (start_ptr_id < 12){
+		for (int i = start_ptr_id; i < 12 && ptr_num != 0; i++){
+			inode->dir_pointer[i] = *ptr_list;
+			ptr_num--;
+			ptr_list++;
+		}
+	}
+	if (start_ptr_id < 14 && ptr_num != 0){
+		for (int i = start_ptr_id - 12 && ptr_num != 0; i < 2; i++){
+			if (inode->ind_pointer[i] == (unsigned short )(-1)){	//	不存在则分配
+				int fblk_id;
+				if (find_fblk(1, &fblk_id) < 0){
+					printf("error: find fblk\n");
 					return -1;
 				}
-
-				*empty_blk_ptr[2] = (unsigned short)ptr_blk;
-				if (disk_write(ptr_blk_id[2], ptr_blk_buf[2])){ //更新inode
-					printf("error: disk write\n");
-					free_inode_blk_buffer(inode_num,&inode);
-					return -1;
-				}
-
+				inode->ind_pointer[i] = fblk_id;
 			}
-			if (disk_read(*empty_blk_ptr[2], buf)){	// 更新ind ptr、位置和blk id
-				empty_blk_ptr_flag = 2;
-				ptr_ipos[1] = (int)PTR_MAX_PBLK;
-				ptr_blk_id[1] = (int)*(empty_blk_ptr[2]);
-				empty_blk_ptr[1] = (unsigned short *)buf;
+			char buf[BLOCK_SIZE];
+			if (disk_read(inode->ind_pointer[i], buf)){
+				printf("error: disk read\n");
+				return -1;
+			}
+			unsigned short *ptr_buf = (unsigned short *)buf;
+			for (int j = 0; j < PTR_MAX_PBLK & ptr_num != 0; j++ ){
+				*ptr_buf = *ptr_list;
+				ptr_list++;
+				ptr_buf++;
+			}
+			if (disk_write(inode->ind_pointer[i], buf)){
+				printf("error: disk write\n");
+				return -1;
 			}
 		}
-		// ind ptr 层
-		#ifdef DEBUG
-		printf("Inode_ptr_add: 3333333333333333333333333333333\n");
-		#endif
-		if (empty_blk_ptr_flag & 2){
-			#ifdef DEBUG
-				printf("Inode_ptr_add: emptr blk ind\n");
-			#endif
-			if (*empty_blk_ptr[1] == (unsigned short)(-1)){ //ind ptr为空，则为其分配一个块
-				int ind_ptr_blk;// 找到空的块
-				if (find_fblk(1, &ind_ptr_blk) < 0){
-					printf("error: no free blocks\n");
-					free_inode_blk_buffer(inode_num,&inode);
-					return -1;
-				}
 
-				*empty_blk_ptr[1] = (unsigned short)ind_ptr_blk;
-				if (disk_write(ptr_blk_id[1], ptr_blk_buf[1])){ //更新inode
-					printf("error: disk write\n");
-					free_inode_blk_buffer(inode_num,&inode);
-					return -1;
-				}
-
+	}
+	if (start_ptr_id <= 15 && ptr_num != 0){
+		if (inode->doub_ind_pointer == (unsigned short)(-1)){
+			int fblk_id;
+			if (find_fblk(1, &fblk_id) < 0){
+				printf("error: find fblk\n");
+				return -1;
 			}
-			if (disk_read(*empty_blk_ptr[1], buf)){	//	更新Dir ptr、位置和blk id
-				ptr_ipos[1] --;
-				if (ptr_ipos[1] == 0)
-					empty_blk_ptr_flag = 1;
-				ptr_ipos[0] = (int)PTR_MAX_PBLK;
-				ptr_blk_id[0] = (int)*empty_blk_ptr[1];
-				empty_blk_ptr[0] = (unsigned short *)buf;
-				empty_blk_ptr[1] ++;
-			}
+			inode->doub_ind_pointer = fblk_id;
 		}
- #ifdef DEBUG
-	printf("Inode_ptr_add: 444444444444444444444444444\n");
-	#endif
-		// dir ptr 层
-		if (disk_read(ptr_blk_id[0], buf)){
-			free_inode_blk_buffer(inode_num,&inode);
+		char ind_buf[BLOCK_SIZE];
+		if (disk_read(inode->doub_ind_pointer, ind_buf)){
 			printf("error: disk read\n");
 			return -1;
 		}
-		#ifdef DEBUG
-	printf("Inode_ptr_add: 5555555555555555555555555555555\n");
-	#endif
-		for (int i = 0 ; i < PTR_MAX_PBLK && ptr_num != 0; i ++){
-			if (ptr_ipos[0] == 0){
-				break;
+		unsigned short* ind_ptr = (unsigned short *)ind_buf;
+		for (int i = 0; i < PTR_MAX_PBLK && ptr_num!=0; i++){
+			if (*ind_ptr == (unsigned short )(-1)){	//	不存在则分配
+				int fblk_id;
+				if (find_fblk(1, &fblk_id) < 0){
+					printf("error: find fblk\n");
+					return -1;
+				}
+				*ind_ptr = fblk_id;
 			}
-			printf("inode_ptr_add: ptr_ipos[0]:%x empty_blk_ptr[0]:%x ptr_list:%x\n", ptr_ipos[0], empty_blk_ptr[0], ptr_list);
-			*empty_blk_ptr[0] =  (unsigned short)(*ptr_list);
-			ptr_ipos[0] --;
-			ptr_list++;
-			empty_blk_ptr[0]++;
-			ptr_num--;
-
+			char buf[BLOCK_SIZE];
+			if (disk_read(*ind_ptr, buf)){
+				printf("error: disk read\n");
+				return -1;
+			}
+			unsigned short* dir_ptr = (unsigned short *)buf;
+			for (int j = 0; j < PTR_MAX_PBLK && ptr_num!=0; j++){
+				*dir_ptr = *ptr_list;
+				dir_ptr++;
+				ptr_list++;
+			}
+			if (disk_write(*ind_ptr, buf)){
+				printf("error: disk write\n");
+				return -1;
+			}
+			ind_ptr++;
 		}
-		#ifdef DEBUG
-	printf("Inode_ptr_add: 666666666666666666666666666666\n");
-	#endif
-		if (disk_write(ptr_blk_id[0], buf)){
-			free_inode_blk_buffer(inode_num,&inode);
+		if (disk_write(inode->doub_ind_pointer, ind_buf)){
 			printf("error: disk write\n");
 			return -1;
 		}
 
-		if (ptr_ipos[2] == 0 && ptr_ipos[1] == 0 && ptr_ipos[0] == 0){	// 所有的ptr都已经遍历完则推出
-			break;
-		}
 	}
-	#ifdef DEBUG
-	printf("Inode_ptr_add: finished\n");
-	#endif
 	free_inode_blk_buffer(inode_num,&inode);
-	return ptr_num;
+	return ptr_num;	
 }
 
 /* inode_ptr_del - free block pointer in the inode
@@ -1065,7 +1016,7 @@ int rm_file_in_parent_dir(const char *child_file_path){
 		*(end_ptr + 1) = '\0';
 	}
 	#ifdef DEBUG
-	printf("rmfile in parent dir: parent:%s child:%s", parent_path, name);
+	printf("rm file in parent dir: parent:%s child:%s\n", parent_path, name);
 	#endif
 	//解析完路径,获取父目录的inode
 	struct Inode* parent_inode;
@@ -1198,7 +1149,7 @@ int rm_file_in_parent_dir(const char *child_file_path){
 	for (int i = 0 ; i < 100 ; i++){
 		printf("%x ", buf[i]);
 	}
-	printf("----------------------\n");
+	printf("\n----------------------\n");
 	#endif
 	dir_pair_ptr = (struct DirPair *)buf;
 	for (int i = 0; i < DIR_PAIR_PBLK; i++){
@@ -1220,7 +1171,7 @@ int rm_file_in_parent_dir(const char *child_file_path){
 			printf("-------------------\n");
 			for (int i = 0; i < 100; i++)
 				printf("%x ", dp_buf[i]);
-			printf("-------------------\n");
+			printf("\n-------------------\n");
 			#endif
 			if (del_dp_blk_id == ptr_list[ptr_n - 1]){
 				dp_ptr  = (struct DirPair*)dp_buf + i-1;
@@ -1278,8 +1229,19 @@ int rm_file_in_parent_dir(const char *child_file_path){
 		free_inode_blk_buffer(parent_inode_num,&parent_inode);
 		return -1;
 	}
+
+	#ifdef DEBUG
+	struct Inode* p__inode;
+	get_inode(parent_path, &p__inode);
+	printf("rm file in parent dir: parent new size %d\n", p__inode->size );
+	free_inode_blk_buffer(parent_inode_num,&p__inode);
+	#endif
+
 	free(ptr_list);
 	free_inode_blk_buffer(parent_inode_num,&parent_inode);
+	#ifdef DEBUG
+	printf("Rm_file_in_parent_dir: is called\n");
+	#endif
 	return 0;
 }
 
@@ -2109,8 +2071,8 @@ int fs_write (const char *path, const char *buffer, size_t size, off_t offset, s
 	}
 
 	struct Inode *inode;
-	int inode_num;
-	if (inode_num = get_inode(path, &inode)){
+	int inode_num = get_inode(path, &inode);
+	if (inode_num < 0){
 		printf("error: get inode\n");
 		free_inode_blk_buffer(inode_num, &inode);
 		return 0;
@@ -2124,7 +2086,7 @@ int fs_write (const char *path, const char *buffer, size_t size, off_t offset, s
 	// int alloc_blk(int inode_num, size_t append_size, unsigned short* blk_ptr, size_t *len,off_t *offset)
 
 	size_t append_size = size + (size_t)offset  - inode->size;
-	if (fi->flags == O_APPEND || append_size > 0){
+	if ((fi->flags & (O_APPEND)) != 0 || append_size > 0){	//WWWW
 		unsigned short* ptr_list = malloc(sizeof(unsigned short)*PTR_MAX_CNT);
 		if(NULL == ptr_list) {
 			printf("Write: malloc error\n");
@@ -2135,7 +2097,7 @@ int fs_write (const char *path, const char *buffer, size_t size, off_t offset, s
 		memset(ptr_list, -1, sizeof(unsigned short)*PTR_MAX_CNT);
 		off_t offset_ = 0;
 		size_t len_ = 0;
-		if(alloc_blk(inode_num, append_size, ptr_list, &len_, &offset_) < 0) {
+		if(alloc_blk(inode_num, append_size, ptr_list, &len_, &offset_) < 0) {	// 获取blk list
 			printf("write: allock block error\n");
 			free_inode_blk_buffer(inode_num, &inode);
 			free(ptr_list);
@@ -2148,11 +2110,12 @@ int fs_write (const char *path, const char *buffer, size_t size, off_t offset, s
 			free(ptr_list);
 			return 0;
 		}
+		free(ptr_list);
 	}
 
 	size_t fwrite_size = (append_size > 0)? size - append_size : size; // 原位更新的大小
 	void *fwrite_buf = (void *)((char *)buffer + offset); // 原位更新开始的buffer地址
-	
+	if (fwrite_size != 0){
 	// unsigned short ptr_list[PTR_MAX_CNT]; //WWWwWWWWWWWWWWWWWWWWWWW
 	unsigned short* ptr_list = malloc(sizeof(unsigned short)*PTR_MAX_CNT);
 	unsigned char ptr_bmap = inode->pointer_bmap;
@@ -2160,6 +2123,7 @@ int fs_write (const char *path, const char *buffer, size_t size, off_t offset, s
 	unsigned int ptr_cnt1 = (ptr_bmap >> 4) & 0x3;
 	unsigned int ptr_cnt2 = ptr_bmap >> 6;
 	size_t ptr_n = 0;
+
 
 	//	下面是获得所有datablock 的ptr list
 	for (int i = 0; i < (int)ptr_cnt0; i++, ptr_n ++){
@@ -2226,7 +2190,15 @@ int fs_write (const char *path, const char *buffer, size_t size, off_t offset, s
 		free_inode_blk_buffer(inode_num,&inode);
 		return 0;
 	}
+	free(ptr_list);
+	}
 	
+	inode_num = get_inode(path, &inode);
+	if (inode_num < 0){
+		printf("error: get inode\n");
+		free_inode_blk_buffer(inode_num, &inode);
+		return 0;
+	}
 	// 更新inode的time和size并写入inode blk
 	if (append_size > 0){
 		inode->ctime = time(NULL);
@@ -2238,13 +2210,20 @@ int fs_write (const char *path, const char *buffer, size_t size, off_t offset, s
 	inode->size = size;
 	if (disk_write(inode_num/(int)INODE_NUM_PBLK + (int)INODE_BASE, inode - inode_num%(int)INODE_NUM_PBLK)){
 		printf("error: disk write\n");
-		free(ptr_list);
 		free_inode_blk_buffer(inode_num,&inode);
 		return -1;
 	}
-	free(ptr_list);
+	#ifdef DEBUG
+	// char xxx[BLOCK_SIZE+1];
+	// get_inode(inode_num, inode);
+	printf("\n----------------------\n");
+	for (int i = 0; i < 12; i++)
+		printf("%x ", inode->dir_pointer[i]);
+	printf("\n----------------------\n");
+	#endif
 	free_inode_blk_buffer(inode_num,&inode);
 	printf("Write is called:%s\n",path);
+
 	return size;
 }
 
@@ -2455,14 +2434,14 @@ int mkfile (const char *path,int is_dir) {
 		return 0;
 	}
 
-	#ifdef DEBUG
-	printf("-----------------------\n");
-	char _buf_[BLOCK_SIZE];
-	disk_read(FBLK_BASE,_buf_);
-	for(int i = 0;i < 100;i++)
-		printf("%x ",_buf_[i]);
-	printf("\n-----------------------\n");
-	#endif
+	// #ifdef DEBUG
+	// printf("-----------------------\n");
+	// char _buf_[BLOCK_SIZE];
+	// disk_read(FBLK_BASE,_buf_);
+	// for(int i = 0;i < 100;i++)
+	// 	printf("%x ",_buf_[i]);
+	// printf("\n-----------------------\n");
+	// #endif
 	
 	if(write_to_blk(ptr_list,len,&tmp_dirpair,sizeof(struct DirPair),offset) < 0) {
 		printf("Mkfile: write to block error\n");
@@ -2482,12 +2461,12 @@ int mkfile (const char *path,int is_dir) {
 	}
 
 	#ifdef DEBUG
-	printf("Mkfile: inode_num:%d,name:%s\n",tmp_dirpair.inode_num,tmp_dirpair.name);
-	printf("Mkfile: ptr_list:%d,len:%d,offset:%d\n",ptr_list[0],len,offset);
-	printf("Mkfile: DirPair size:%ld\n",sizeof(struct DirPair));	
-	printf("-----------------------\n");
+	// printf("Mkfile: inode_num:%d,name:%s\n",tmp_dirpair.inode_num,tmp_dirpair.name);
+	// printf("Mkfile: ptr_list:%d,len:%d,offset:%d\n",ptr_list[0],len,offset);
+	// printf("Mkfile: DirPair size:%ld\n",sizeof(struct DirPair));	
+	// printf("-----------------------\n");
 	char ___buf_[BLOCK_SIZE];
-	disk_read(FBLK_BASE,_buf_);
+	disk_read(FBLK_BASE,___buf_);
 	for(int i = 0;i < 100;i++)
 		printf("%x ",___buf_[i]);
 	printf("\n-----------------------\n");
@@ -2656,6 +2635,9 @@ int write_to_blk(unsigned short* blk_ptr,size_t len,void* buffer,size_t size,off
 		size_t write_size = size;
 		for (int i = 0; i < len; i++){
 			char buffer_[BLOCK_SIZE + 1];
+			#ifdef DEBUG
+			printf("write_to_blk: %d\n", *blk_ptr);
+			#endif
 			if (disk_read(*blk_ptr + FBLK_BASE, buffer_)){
 				printf("error: disk read\n");
 			}
@@ -2676,6 +2658,7 @@ int write_to_blk(unsigned short* blk_ptr,size_t len,void* buffer,size_t size,off
 
 /* 配合写入块时的辅助函数, 判断是否需要分配新的块,如果需要则分配
  * 分配完块后, 相应的指针, 指针块都有修改
+ * 注意!: 不更改inode的size
  * 注意! 新块全初始化为-1, 为方便文件夹使用(也可判断)
  * 接口:
  * inode: 即文件的inode
@@ -2731,7 +2714,7 @@ int alloc_blk(int inode_num,size_t append_size,unsigned short* blk_ptr,size_t *l
 		*len = 1;
 		*offset = BLOCK_SIZE - cur_fspc; //即最后一个未满的块 - 剩余空间. 
 		#ifdef DEBUG
-		printf("Alloc blk: cur_fspc:%d,append_size:%d,cur_size:%d\n",cur_fspc,append_size,cur_size);
+		printf("Alloc blk: cur_fspc:%d,append_size:%d,cur_size:%d |||||||||||||||||||||||||||||||||||||\n",cur_fspc,append_size,cur_size);
 		#endif
 		unsigned int ptr0_start_index,ptr1_start_index,ptr2_start_index;
 		char tbuffer[BLOCK_SIZE];
@@ -2789,7 +2772,7 @@ int alloc_blk(int inode_num,size_t append_size,unsigned short* blk_ptr,size_t *l
 		
 		int blkptr_index = (0 == cur_fspc) ? 0 : 1;
 		*len = (0 == cur_fspc) ? needed_fblk : (needed_fblk + 1);
-		*offset = (0 == cur_fspc) ? (BLOCK_SIZE - cur_fspc) : 0;
+		*offset = (0 == cur_fspc) ? 0 : (BLOCK_SIZE - cur_fspc);
 
 		unsigned int ptr0_start_index,ptr1_start_index,ptr2_start_index;
 		char tbuffer[BLOCK_SIZE];
@@ -2962,8 +2945,9 @@ int fs_unlink (const char *path){
 int fs_rename (const char *oldpath, const char *newname)
 {
 	#ifdef DEBUG
-	printf("Rename: start\n");
+	printf("Rename: start ++++++++++++++++++++++++++\n");
 	#endif
+	//提取父目录
 	char old_parent_path[BLOCK_SIZE];
 	char new_parent_path[BLOCK_SIZE];
 	char name[NAME_MAX_LEN+1];
@@ -2980,7 +2964,7 @@ int fs_rename (const char *oldpath, const char *newname)
 		new_parent_path[new_len-1] = '\0';
 		new_len--;
 	}
-
+	
 	char* old_end_ptr = strrchr(old_parent_path,'/');
 	if(old_end_ptr != old_parent_path) {
 		*old_end_ptr = '\0';
@@ -2990,7 +2974,7 @@ int fs_rename (const char *oldpath, const char *newname)
 	}
 
 	char* new_end_ptr = strrchr(new_parent_path,'/');
-	strcpy(name,new_end_ptr);
+	strcpy(name,new_end_ptr+1);
 	if(new_end_ptr != new_parent_path) {
 		*new_end_ptr = '\0';
 	}
@@ -2998,7 +2982,12 @@ int fs_rename (const char *oldpath, const char *newname)
 		*(new_end_ptr+1) = '\0';
 	}
 
-
+	#ifdef DEBUG
+	printf("Rename: old_parent_path:%s, new_parent_path:%s\n",old_parent_path,new_parent_path);
+	printf("Rename: name:%s,newname:%s\n",name,newname);
+	#endif
+	
+	//获取文件,俩父目录的inode
 	int inode_num, new_parent_inode_num, old_parent_inode_num;
 	struct Inode* inode;
 	struct Inode* new_parent_inode;
@@ -3007,9 +2996,25 @@ int fs_rename (const char *oldpath, const char *newname)
 	old_parent_inode_num = get_inode(old_parent_path,&old_parent_inode);
 	new_parent_inode_num = get_inode(new_parent_path,&new_parent_inode);
 	
-	//删除原目录下的DirPair
-		rm_file_in_parent_dir(oldpath);
+	#ifdef DEBUG
+	char _tbuf[BLOCK_SIZE];
+	disk_read(old_parent_inode->dir_pointer[0]+FBLK_BASE,_tbuf);
+	printf("old_parent_inode_block---------------------------------\n");
+	for(int i = 0;i < 100;i++)
+		printf("%x ",_tbuf[i]);
+	printf("\n--------------------------------\n");
+	#endif
 
+	//删除原目录下的DirPair
+	rm_file_in_parent_dir(oldpath);
+
+	#ifdef DEBUG
+	disk_read(old_parent_inode->dir_pointer[0]+FBLK_BASE,_tbuf);
+	printf("old_parent_inode_block---------------------------------\n");
+	for(int i = 0;i < 100;i++)
+		printf("%x ",_tbuf[i]);
+	printf("\n--------------------------------\n");
+	#endif
 	//添加到新目录下的DirPair
 		//WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW:需要更新time吗? 暂时不更新
 	struct DirPair newpair;
@@ -3046,6 +3051,22 @@ int fs_rename (const char *oldpath, const char *newname)
 		return -1;
 	}
 
+	#ifdef DEBUG
+	disk_read(old_parent_inode->dir_pointer[0]+FBLK_BASE,_tbuf);
+	printf("old_parent_inode_block---------------------------------\n");
+	for(int i = 0;i < 100;i++)
+		printf("%x ",_tbuf[i]);
+	printf("\n--------------------------------\n");
+	#endif
+	
+	#ifdef DEBUG
+	disk_read(new_parent_inode->dir_pointer[0]+FBLK_BASE,_tbuf);
+	printf("new_parent_inode_block---------------------------------\n");
+	for(int i = 0;i < 100;i++)
+		printf("%x ",_tbuf[i]);
+	printf("\n--------------------------------\n");
+	#endif
+
 	new_parent_inode->size += sizeof(struct DirPair);
 	//抄ljt的
 	if (disk_write(new_parent_inode_num/(int)INODE_NUM_PBLK + (int)INODE_BASE, new_parent_inode - inode_num%(int)INODE_NUM_PBLK)){
@@ -3056,8 +3077,16 @@ int fs_rename (const char *oldpath, const char *newname)
 		free_inode_blk_buffer(new_parent_inode_num,&new_parent_inode);
 		return -1;
 	}
+	
+	// #ifdef DEBUG
+	// int tmp_inode_num;
+	// struct Inode* t_inode;
+	// tmp_inode_num = get_inode(newname,&t_inode);
+	// printf("Rename: new Inode->size:%d\n",t_inode->size);
+	// free_inode_blk_buffer(tmp_inode_num,&t_inode);
+	// #endif
 
-	printf("Rename is called:%s\n",oldpath);
+	printf("Rename is called:%s ++++++++++++++++++++++++++\n",oldpath);
 	free_inode_blk_buffer(inode_num,&inode);
 	free_inode_blk_buffer(old_parent_inode_num,&old_parent_inode);
 	free_inode_blk_buffer(new_parent_inode_num,&new_parent_inode);
