@@ -1,5 +1,4 @@
 
-
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
@@ -1044,6 +1043,8 @@ int indoe_ptr_del(int inode_num, int start_ptr_num){
 
 int rm_file_in_parent_dir(const char *child_file_path){
 	// "/xxx/xxx/" or "/xxx/xxx" 都看作 /xxx/xxx
+	printf("rm file in parent dir: start\n");
+	printf("rm_file_in_dir:%s\n", child_file_path);
 	//先解析路径,将path分为父目录和文件(夹)
 	char path[BLOCK_SIZE];
 	memcpy(path, child_file_path, strlen(child_file_path));
@@ -1052,8 +1053,8 @@ int rm_file_in_parent_dir(const char *child_file_path){
 	strcpy(parent_path,child_file_path);
 	size_t len = strlen(child_file_path);
 	if(child_file_path[len-1] == '/') {
-		len--;
 		parent_path[len-1] = '\0';
+		len--;
 	}
 	char* end_ptr = strrchr(parent_path,'/'); //找到最后一个'/'的位置
 	strcpy(name,end_ptr+1); 
@@ -1084,7 +1085,8 @@ int rm_file_in_parent_dir(const char *child_file_path){
 
 	// 删去表项
 	// 下面是获得所有datablock 的ptr list
-	unsigned short ptr_list[PTR_MAX_CNT]; //WWWwWWWWWWWWWWWWWWWWWWW
+	// unsigned short ptr_list[PTR_MAX_CNT]; //WWWwWWWWWWWWWWWWWWWWWWW
+	unsigned short *ptr_list = malloc(sizeof(unsigned short) * PTR_MAX_CNT);
 	unsigned char ptr_bmap = parent_inode->pointer_bmap;
 	unsigned int ptr_cnt0 = ptr_bmap & 0xf;
 	unsigned int ptr_cnt1 = (ptr_bmap >> 4) & 0x3;
@@ -1096,10 +1098,14 @@ int rm_file_in_parent_dir(const char *child_file_path){
 		ptr_list[ptr_n];
 	}
 
+	#ifdef DEBUG
+	printf("rm file in parent: 111111111111111\n");
+	#endif
 	for (int i = 0; i < (int)ptr_cnt1 && (int)ptr_cnt0 == 12; i++){
 		char buf[BLOCK_SIZE + 1];
 		if (disk_read(parent_inode->ind_pointer[i]+(unsigned short)FBLK_BASE, buf)){
 			printf("error: disk read\n");
+			free(ptr_list);
 			free_inode_blk_buffer(parent_inode_num,&parent_inode);
 			return -1;		
 		}
@@ -1113,10 +1119,14 @@ int rm_file_in_parent_dir(const char *child_file_path){
 			dir_ptr++;
 		}
 	}
+	#ifdef DEBUG
+	printf("rm file in parent: 222222222222222222\n");
+	#endif
 	if (ptr_cnt2 != 0){
 		char ind_buf[BLOCK_SIZE + 1];
 		if (disk_read(parent_inode->doub_ind_pointer+(unsigned short)FBLK_BASE, ind_buf)){
 			printf("error: disk read\n");
+			free(ptr_list);
 			free_inode_blk_buffer(parent_inode_num,&parent_inode);
 			return -1;		
 		}
@@ -1128,6 +1138,7 @@ int rm_file_in_parent_dir(const char *child_file_path){
 			char buf[BLOCK_SIZE + 1];
 			if (disk_read((int)(*ind_ptr)+(unsigned short)FBLK_BASE, buf)){
 				printf("error: disk read\n");
+				free(ptr_list);
 				free_inode_blk_buffer(parent_inode_num,&parent_inode);
 				return -1;
 			}
@@ -1142,6 +1153,9 @@ int rm_file_in_parent_dir(const char *child_file_path){
 			ind_ptr++;
 		}
 	}
+	#ifdef DEBUG
+	printf("rm file in parent: 333333333333333333\n");
+	#endif
 
 	struct DirPair *dir_pair_ptr;
 	int del_dp_blk_id = -1;
@@ -1168,13 +1182,24 @@ int rm_file_in_parent_dir(const char *child_file_path){
 		}
 	}
 
+	#ifdef DEBUG
+	printf("rm file in parent dir: %d %d\n", ptr_n, ptr_list[ptr_n-1]);
+	#endif
 	// 更新blk
 	char buf[BLOCK_SIZE + 1];
-	if (disk_read(ptr_list[ptr_n]+(unsigned short)FBLK_BASE, buf)){		// 读出最后一块
+	if (disk_read(ptr_list[ptr_n-1]+(unsigned short)FBLK_BASE, buf)){		// 读出最后一块
 		printf("error: disk read\n");
+		free(ptr_list);
 		free_inode_blk_buffer(parent_inode_num,&parent_inode);
 		return -1;
 	}
+	#ifdef DEBUG
+	printf("----------------------\n");
+	for (int i = 0 ; i < 100 ; i++){
+		printf("%x ", buf[i]);
+	}
+	printf("----------------------\n");
+	#endif
 	dir_pair_ptr = (struct DirPair *)buf;
 	for (int i = 0; i < DIR_PAIR_PBLK; i++){
 		if (dir_pair_ptr->inode_num == -1){
@@ -1183,27 +1208,45 @@ int rm_file_in_parent_dir(const char *child_file_path){
 			char dp_buf[BLOCK_SIZE + 1];
 			if (disk_read(del_dp_blk_id+(unsigned short)FBLK_BASE, dp_buf)){		
 				printf("error: disk read\n");
+				free(ptr_list);
 				free_inode_blk_buffer(parent_inode_num,&parent_inode);
 				return -1;
 			}
 			struct DirPair *dp_ptr = (struct DirPair *)dp_buf;	
 			dp_ptr += del_dp_blk_offset;
 			memcpy(dp_ptr, dir_pair_ptr, sizeof(dir_pair_ptr));
+			#ifdef DEBUG
+			printf("rm file in parent dir: %s:%s\n", dp_ptr->name, name);
+			printf("-------------------\n");
+			for (int i = 0; i < 100; i++)
+				printf("%x ", dp_buf[i]);
+			printf("-------------------\n");
+			#endif
+			if (del_dp_blk_id == ptr_list[ptr_n - 1]){
+				dp_ptr  = (struct DirPair*)dp_buf + i-1;
+				memset(dp_ptr, -1, sizeof(struct DirPair));
+			}
+			else{
+				memset(dir_pair_ptr, -1, sizeof(struct DirPair));
+				if (disk_write(ptr_list[ptr_n-1]+(unsigned short)FBLK_BASE, buf)){
+					printf("error: disk write\n");
+					free(ptr_list);
+					free_inode_blk_buffer(parent_inode_num,&parent_inode);
+					return -1;
+				}				
+			}
+			
 			if (disk_write(del_dp_blk_id+(unsigned short)FBLK_BASE, dp_buf)){
 				printf("error: disk write\n");
-				free_inode_blk_buffer(parent_inode_num,&parent_inode);
-				return -1;
-			}			
-
-			memset(dir_pair_ptr, -1, sizeof(struct DirPair));
-			if (disk_write(ptr_list[ptr_n]+(unsigned short)FBLK_BASE, buf)){
-				printf("error: disk write\n");
+				free(ptr_list);
 				free_inode_blk_buffer(parent_inode_num,&parent_inode);
 				return -1;
 			}
+
 			if (i == 1){ // 检查末尾块是否为空，为空则删去
 				if (indoe_ptr_del(parent_inode_num, ptr_n)){
 					printf("error: inode ptr del\n");
+					free(ptr_list);
 					free_inode_blk_buffer(parent_inode_num,&parent_inode);
 					return -1;
 				}
@@ -1212,6 +1255,16 @@ int rm_file_in_parent_dir(const char *child_file_path){
 		}
 		dir_pair_ptr++;
 	}
+
+	#ifdef DEBUG
+	printf("-----------------------\n");
+	char _buf_[BLOCK_SIZE];
+	disk_read(FBLK_BASE,_buf_);
+	for(int i = 0;i < 100;i++)
+		printf("%x ",_buf_[i]);
+	printf("\n-----------------------\n");
+	#endif
+
 	// 更新inode
 	time_t cur_time = time(NULL);
 	parent_inode->mtime = cur_time;
@@ -1221,9 +1274,11 @@ int rm_file_in_parent_dir(const char *child_file_path){
 	int inode_blk_offset = parent_inode_num %(int)INODE_NUM_PBLK;
 	if (disk_write(inode_blk_id, parent_inode - inode_blk_offset)){
 		printf("error: disk write\n");
+		free(ptr_list);
 		free_inode_blk_buffer(parent_inode_num,&parent_inode);
 		return -1;
 	}
+	free(ptr_list);
 	free_inode_blk_buffer(parent_inode_num,&parent_inode);
 	return 0;
 }
@@ -1276,8 +1331,18 @@ int rmfile(const char* path){
 		return -1;
 	}
 	#ifdef DEBUG
-	printf("rmfile:33333333333333333333\n");
+	printf("rmfile:33333333333333333333%s\n", path);
 	#endif
+
+	#ifdef DEBUG
+	printf("-----------------------\n");
+	char _buf_[BLOCK_SIZE];
+	disk_read(FBLK_BASE,_buf_);
+	for(int i = 0;i < 100;i++)
+		printf("%x ",_buf_[i]);
+	printf("\n-----------------------\n");
+	#endif
+
 
 	if (rm_file_in_parent_dir(path)){	// 4 更新父母录
 		printf("error: rm file in parent dir\n");
@@ -1593,7 +1658,7 @@ int fs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t off
         // printf("readdir:  dir ptr\n");
 	    // ptr used or not, if not, continue
         if (dir_inode->dir_pointer[i] == (unsigned short)(-1)){
-            i--;
+            // i--;
             break;
         }
 		// read in data block
@@ -2088,7 +2153,8 @@ int fs_write (const char *path, const char *buffer, size_t size, off_t offset, s
 	size_t fwrite_size = (append_size > 0)? size - append_size : size; // 原位更新的大小
 	void *fwrite_buf = (void *)((char *)buffer + offset); // 原位更新开始的buffer地址
 	
-	unsigned short ptr_list[PTR_MAX_CNT]; //WWWwWWWWWWWWWWWWWWWWWWW
+	// unsigned short ptr_list[PTR_MAX_CNT]; //WWWwWWWWWWWWWWWWWWWWWWW
+	unsigned short* ptr_list = malloc(sizeof(unsigned short)*PTR_MAX_CNT);
 	unsigned char ptr_bmap = inode->pointer_bmap;
 	unsigned int ptr_cnt0 = ptr_bmap & 0xf;
 	unsigned int ptr_cnt1 = (ptr_bmap >> 4) & 0x3;
@@ -2318,8 +2384,8 @@ int mkfile (const char *path,int is_dir) {
 			return 0;
 		}
 		else {
-			len--;
 			parent_path[len-1] = '\0';
+			len--;
 		}
 	}
 	
@@ -2389,6 +2455,15 @@ int mkfile (const char *path,int is_dir) {
 		return 0;
 	}
 
+	#ifdef DEBUG
+	printf("-----------------------\n");
+	char _buf_[BLOCK_SIZE];
+	disk_read(FBLK_BASE,_buf_);
+	for(int i = 0;i < 100;i++)
+		printf("%x ",_buf_[i]);
+	printf("\n-----------------------\n");
+	#endif
+	
 	if(write_to_blk(ptr_list,len,&tmp_dirpair,sizeof(struct DirPair),offset) < 0) {
 		printf("Mkfile: write to block error\n");
 		free_inode_blk_buffer(parent_inode_num,&parent_inode);
@@ -2410,12 +2485,12 @@ int mkfile (const char *path,int is_dir) {
 	printf("Mkfile: inode_num:%d,name:%s\n",tmp_dirpair.inode_num,tmp_dirpair.name);
 	printf("Mkfile: ptr_list:%d,len:%d,offset:%d\n",ptr_list[0],len,offset);
 	printf("Mkfile: DirPair size:%ld\n",sizeof(struct DirPair));	
-	// printf("-----------------------\n");
-	// char _buf_[BLOCK_SIZE];
-	// disk_read(FBLK_BASE,_buf_);
-	// for(int i = 0;i < 100;i++)
-	// 	printf("%x ",_buf_[i]);
-	// printf("\n-----------------------\n");
+	printf("-----------------------\n");
+	char ___buf_[BLOCK_SIZE];
+	disk_read(FBLK_BASE,_buf_);
+	for(int i = 0;i < 100;i++)
+		printf("%x ",___buf_[i]);
+	printf("\n-----------------------\n");
 	#endif
 	//获取空闲的inode,初始化时不分配块
 		//修改相应的inode_bmap
@@ -2578,12 +2653,20 @@ int write_to_blk(unsigned short* blk_ptr,size_t len,void* buffer,size_t size,off
 
 	}
 	else{
+		size_t write_size = size;
 		for (int i = 0; i < len; i++){
-			if (disk_write(*blk_ptr + FBLK_BASE, buffer)){
+			char buffer_[BLOCK_SIZE + 1];
+			if (disk_read(*blk_ptr + FBLK_BASE, buffer_)){
+				printf("error: disk read\n");
+			}
+			size_t memcpy_size = (write_size > (size_t)BLOCK_SIZE)? BLOCK_SIZE:write_size;
+			memcpy(buffer_, buffer, memcpy_size);
+			if (disk_write(*blk_ptr + FBLK_BASE, buffer_)){
 				printf("error: disk write\n");
 				return -1;
 			}
 			blk_ptr++;
+			write_size = write_size - (size_t)BLOCK_SIZE;
 			buffer = (void*)((char *)buffer + (int)BLOCK_SIZE);
 		}
 	}
