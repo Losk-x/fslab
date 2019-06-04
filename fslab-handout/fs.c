@@ -1210,6 +1210,10 @@ int mkfs(){
 	
 	// initialize inode blocks
 	memset(buf, -1, BLOCK_SIZE);
+	// initialize inode data block
+	if (disk_write(FBLK_BASE, buf)){
+		return -1;
+	}
 	for (int i = INODE_BASE; i < FBLK_BASE; i++){
 		if (disk_write(i, buf)){
 			printf("error: disk write error\n");
